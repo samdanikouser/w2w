@@ -1,0 +1,399 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════
+//  W2W Platform – Database Schema
+//  Based on W2W_Technical_Development_Plan.md
+//  POPIA-compliant · All PII fields encrypted at app layer
+// ═══════════════════════════════════════════════════
+
+// ── Roles ──
+enum Role {
+  SUPER_ADMIN
+  SITE_ADMIN
+  DATA_CLERK
+  FIELD_WORKER
+}
+
+// ── User accounts ──
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  role          Role     @default(FIELD_WORKER)
+  // Optional link to an existing Employee record (created by admin in Settings → Users)
+  employeeId    String?  @unique
+  employee      Employee? @relation("EmployeeUser", fields: [employeeId], references: [id])
+  // Optional link to a programme-defined custom role label (display only — permissions still come from `role`)
+  customRoleId  String?
+  customRole    CustomRole? @relation(fields: [customRoleId], references: [id])
+  siteId        String?
+  site          Site?    @relation(fields: [siteId], references: [id])
+  isActive      Boolean  @default(true)
+  lastLogin     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  wasteLogs     WasteLog[]  @relation("CreatedByUser")
+  approvedLogs  WasteLog[]  @relation("ApprovedByUser")
+  auditLogs     AuditLog[]
+  violations    Violation[] @relation("ViolationIssuedBy")
+
+  @@map("users")
+}
+
+// ── Programme-defined role labels (admin-configurable in Settings → Roles) ──
+model CustomRole {
+  id          String  @id @default(uuid())
+  name        String  @unique  // e.g. "HR Manager", "Site Supervisor — North"
+  description String  @default("")
+  // Maps to one of the base permission tiers below; used by the authorize() middleware
+  systemRole  Role    @default(FIELD_WORKER)
+  isActive    Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+
+  @@map("custom_roles")
+}
+
+// ── Sites / Cooperatives / Depots ──
+enum SiteType {
+  COOPERATIVE
+  DEPOT
+  BUYBACK_CENTRE
+}
+
+enum SiteStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Site {
+  id        String     @id @default(uuid())
+  name      String
+  type      SiteType   @default(COOPERATIVE)
+  region    String     @default("")
+  address   String     @default("")
+  lat       Float?
+  lng       Float?
+  status    SiteStatus @default(ACTIVE)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  users      User[]
+  employees  Employee[]
+  wasteLogs  WasteLog[]
+  vehicles   Vehicle[]
+  stockItems StockItem[]
+
+  @@map("sites")
+}
+
+// ── Employee records ──
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  TERMINATED
+  PROBATION
+}
+
+model Employee {
+  id          String         @id @default(uuid())
+  empNo       String         @unique
+  firstName   String
+  lastName    String
+  idNumber    String         @default("")  // SA ID – encrypted at app layer
+  role        String         @default("")
+  department  String         @default("")
+  siteId      String?
+  site        Site?          @relation(fields: [siteId], references: [id])
+  status      EmployeeStatus @default(ACTIVE)
+  email       String         @default("")
+  phone       String         @default("")
+  startDate   DateTime?
+  endDate     DateTime?
+  dailyRate   Float          @default(0)
+  bankName    String         @default("")  // encrypted at app layer
+  bankAccount String         @default("")  // encrypted at app layer
+  bankBranch  String         @default("")
+  photo       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  wasteLogs   WasteLog[]     @relation("CollectorLogs")
+  attendances Attendance[]
+  trainings   EmployeeTraining[]
+  violations  Violation[]
+  user        User?          @relation("EmployeeUser")
+
+  @@map("employees")
+}
+
+// ── Attendance tracking ──
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  LEAVE
+}
+
+model Attendance {
+  id         String           @id @default(uuid())
+  employeeId String
+  employee   Employee         @relation(fields: [employeeId], references: [id])
+  date       DateTime
+  status     AttendanceStatus @default(PRESENT)
+  clockIn    DateTime?
+  clockOut   DateTime?
+  hoursWorked Float?
+  notes      String?
+  createdAt  DateTime         @default(now())
+
+  @@unique([employeeId, date])
+  @@map("attendances")
+}
+
+// ── Waste types / categories ──
+model WasteType {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  category     String   @default("")
+  unit         String   @default("kg")
+  pricePerUnit Float    @default(0)
+  colour       String   @default("#146484")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  wasteLogs WasteLog[]
+
+  @@map("waste_types")
+}
+
+// ── Waste collection logs ──
+enum LogStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model WasteLog {
+  id           String    @id @default(uuid())
+  date         DateTime
+  siteId       String?
+  site         Site?     @relation(fields: [siteId], references: [id])
+  wasteTypeId  String?
+  wasteType    WasteType? @relation(fields: [wasteTypeId], references: [id])
+  quantity     Float
+  unit         String    @default("kg")
+  pricePerUnit Float     @default(0)
+  totalValue   Float     @default(0)
+  collectorId  String?
+  collector    Employee? @relation("CollectorLogs", fields: [collectorId], references: [id])
+  status       LogStatus @default(PENDING)
+  notes        String?
+  createdById  String?
+  createdBy    User?     @relation("CreatedByUser", fields: [createdById], references: [id])
+  approvedById String?
+  approvedBy   User?     @relation("ApprovedByUser", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("waste_logs")
+}
+
+// ── Vehicles ──
+enum VehicleStatus {
+  OPERATIONAL
+  MAINTENANCE
+  DECOMMISSIONED
+}
+
+model Vehicle {
+  id           String        @id @default(uuid())
+  registration String        @unique
+  make         String        @default("")
+  model        String        @default("")
+  year         Int?
+  siteId       String?
+  site         Site?         @relation(fields: [siteId], references: [id])
+  status       VehicleStatus @default(OPERATIONAL)
+  fuelType     String        @default("")
+  lastService  DateTime?
+  nextService  DateTime?
+  odometerKm   Float?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@map("vehicles")
+}
+
+// ── Training modules ──
+model TrainingModule {
+  id          String   @id @default(uuid())
+  name        String
+  description String   @default("")
+  durationHrs Float    @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employeeTrainings EmployeeTraining[]
+
+  @@map("training_modules")
+}
+
+// ── Employee → Training link ──
+enum TrainingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  EXPIRED
+}
+
+model EmployeeTraining {
+  id               String         @id @default(uuid())
+  employeeId       String
+  employee         Employee       @relation(fields: [employeeId], references: [id])
+  trainingModuleId String
+  trainingModule   TrainingModule @relation(fields: [trainingModuleId], references: [id])
+  status           TrainingStatus @default(NOT_STARTED)
+  completedDate    DateTime?
+  expiryDate       DateTime?
+  score            Float?
+  createdAt        DateTime       @default(now())
+
+  @@unique([employeeId, trainingModuleId])
+  @@map("employee_trainings")
+}
+
+// ── Financial transactions (P&L) ──
+enum TransactionType {
+  REVENUE
+  EXPENSE
+}
+
+model Transaction {
+  id          String          @id @default(uuid())
+  date        DateTime
+  type        TransactionType
+  category    String          @default("")
+  description String          @default("")
+  amount      Float
+  siteId      String?
+  reference   String?
+  meta        Json?           // flexible metadata for invoice discounts etc.
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@map("transactions")
+}
+
+// ── EPR monthly reports ──
+enum ReportStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED_REPORT
+  REJECTED_REPORT
+}
+
+model EprReport {
+  id           String       @id @default(uuid())
+  month        Int
+  year         Int
+  siteId       String?
+  totalTonnes  Float        @default(0)
+  totalRevenue Float        @default(0)
+  status       ReportStatus @default(DRAFT)
+  submittedAt  DateTime?
+  data         Json?        // full report payload
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@unique([month, year, siteId])
+  @@map("epr_reports")
+}
+
+// ── Stock items (PPE, consumables, equipment) ──
+enum StockStatus {
+  OK
+  LOW
+  OUT
+}
+
+model StockItem {
+  id         String      @id @default(uuid())
+  code       String      @unique
+  item       String
+  category   String      @default("PPE")
+  uom        String      @default("each")
+  onHand     Float       @default(0)
+  reorderAt  Float       @default(0)
+  status     StockStatus @default(OK)
+  siteId     String?
+  site       Site?       @relation(fields: [siteId], references: [id])
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@map("stock_items")
+}
+
+// ── Disciplinary records / warnings ──
+enum ViolationSeverity {
+  VERBAL
+  WRITTEN
+  FINAL_WRITTEN
+  DISMISSAL
+}
+
+enum ViolationStatus {
+  OPEN
+  ACKNOWLEDGED
+  CLOSED
+}
+
+model Violation {
+  id         String            @id @default(uuid())
+  employeeId String
+  employee   Employee          @relation(fields: [employeeId], references: [id])
+  date       DateTime
+  type       String
+  severity   ViolationSeverity @default(VERBAL)
+  issuedById String?
+  issuedBy   User?             @relation("ViolationIssuedBy", fields: [issuedById], references: [id])
+  status     ViolationStatus   @default(OPEN)
+  notes      String            @default("")
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@map("violations")
+}
+
+// ── Audit log (POPIA compliance) ──
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String   // e.g. CREATE, UPDATE, DELETE, LOGIN, EXPORT
+  entity    String   // e.g. Employee, WasteLog
+  entityId  String?
+  detail    String?  // human-readable description
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
