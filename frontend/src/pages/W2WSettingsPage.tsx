@@ -284,10 +284,10 @@ export default function W2WSettingsPage() {
               </div>
               <div className="fgrid">
                 <div className="fg"><label className="fl">Programme Name</label>
-                  <input className="fc" value={org.programmeName || ''} onChange={(e) => setOrgField('programmeName', e.target.value)} placeholder="e.g. Waste to Work — City of Johannesburg" />
+                  <input className="fc" value={org.programmeName || 'Waste To Work'} disabled style={{ opacity: 0.6 }} />
                 </div>
                 <div className="fg"><label className="fl">Implementing Partner</label>
-                  <input className="fc" value={org.partner || ''} onChange={(e) => setOrgField('partner', e.target.value)} placeholder="e.g. Athina Tech" />
+                  <input className="fc" value={org.partner || 'SCM'} disabled style={{ opacity: 0.6 }} />
                 </div>
                 <div className="fg"><label className="fl">Reporting Currency</label>
                   <select className="fc" value={org.currency || 'ZAR'} onChange={(e) => setOrgField('currency', e.target.value)}>
@@ -296,18 +296,8 @@ export default function W2WSettingsPage() {
                     <option value="EUR">EUR — Euro</option>
                   </select>
                 </div>
-                <div className="fg"><label className="fl">Tax Year</label>
-                  <select className="fc" value={org.taxYear || 'mar-feb'} onChange={(e) => setOrgField('taxYear', e.target.value)}>
-                    <option value="mar-feb">March – February</option>
-                    <option value="jan-dec">January – December</option>
-                    <option value="apr-mar">April – March</option>
-                  </select>
-                </div>
                 <div className="fg"><label className="fl">VAT Number</label>
                   <input className="fc" value={org.vat || ''} onChange={(e) => setOrgField('vat', e.target.value)} placeholder="4XXXXXXXXX" />
-                </div>
-                <div className="fg"><label className="fl">EPR PRO</label>
-                  <input className="fc" value={org.epr || ''} onChange={(e) => setOrgField('epr', e.target.value)} placeholder="e.g. PETCO, Polyco" />
                 </div>
               </div>
 
@@ -320,9 +310,6 @@ export default function W2WSettingsPage() {
                 </div>
                 <div className="fg"><label className="fl">Support Phone</label>
                   <input className="fc" value={org.supportPhone || ''} onChange={(e) => setOrgField('supportPhone', e.target.value)} placeholder="+27 …" />
-                </div>
-                <div className="fg"><label className="fl">Information Officer (POPIA)</label>
-                  <input className="fc" value={org.popiaOfficer || ''} onChange={(e) => setOrgField('popiaOfficer', e.target.value)} placeholder="Name / email" />
                 </div>
                 <div className="fg"><label className="fl">Default Region</label>
                   <input className="fc" value={org.region || ''} onChange={(e) => setOrgField('region', e.target.value)} placeholder="e.g. Gauteng" />
@@ -404,13 +391,13 @@ function WasteCategoriesTab({ onToast }: { onToast: (msg: string) => void }) {
         <span><b>Admin only:</b> Pricing changes apply immediately to all new waste revenue and P&L calculations.</span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-        <button className="btn btn-primary" onClick={() => { setEditing(blank); setShowAdd(true); }}><Plus size={13} /> Add Category</button>
+        <button className="btn btn-primary" onClick={() => { setEditing(blank); setShowAdd(true); }}><Plus size={13} /> Add Waste Stream</button>
       </div>
       <div className="tw">
         <table>
           <thead><tr>
             <th style={{ width: 10 }}></th>
-            <th>Name</th><th>Category Group</th><th>Unit</th><th>Price/Unit</th><th>EPR Price/kg</th><th>Buyer</th><th>Actions</th>
+            <th>Name</th><th>Category Group</th><th>Unit</th><th>EPR Price/kg</th><th>Buyer</th><th>Actions</th>
           </tr></thead>
           <tbody>
             {wasteTypes.map((cat: any) => (
@@ -419,7 +406,6 @@ function WasteCategoriesTab({ onToast }: { onToast: (msg: string) => void }) {
                 <td style={{ fontWeight: 600 }}>{cat.name}</td>
                 <td>{cat.category || '—'}</td>
                 <td>{cat.unit}</td>
-                <td style={{ fontWeight: 600, color: 'var(--color-green)' }}>R {cat.pricePerUnit?.toFixed(2) || '0.00'}</td>
                 <td style={{ fontWeight: 600, color: 'var(--color-green)' }}>R {cat.pricePerKg?.toFixed(2) || '0.00'}</td>
                 <td>{cat.buyer || '—'}</td>
                 <td>
@@ -437,7 +423,7 @@ function WasteCategoriesTab({ onToast }: { onToast: (msg: string) => void }) {
 
       {(editing || showAdd) && (
         <ItemModal
-          title={editing?.id ? 'Edit Waste Category' : 'Add Waste Category'}
+          title={editing?.id ? 'Edit Waste Category' : 'Add Waste Stream'}
           onClose={() => { setEditing(null); setShowAdd(false); }}
           onSave={() => editing && save(editing)}
         >
@@ -450,9 +436,6 @@ function WasteCategoriesTab({ onToast }: { onToast: (msg: string) => void }) {
             </div>
             <div className="fg"><label className="fl">Unit</label>
               <input className="fc" value={editing?.unit || ''} onChange={(e) => setEditing({ ...editing!, unit: e.target.value })} placeholder="e.g. kg" />
-            </div>
-            <div className="fg"><label className="fl">Price per Unit (R)</label>
-              <input className="fc" type="number" value={editing?.pricePerUnit ?? 0} onChange={(e) => setEditing({ ...editing!, pricePerUnit: parseFloat(e.target.value) || 0 })} min="0" step="0.10" />
             </div>
             <div className="fg"><label className="fl">EPR Price per kg (R)</label>
               <input className="fc" type="number" value={editing?.pricePerKg ?? 0} onChange={(e) => setEditing({ ...editing!, pricePerKg: parseFloat(e.target.value) || 0 })} min="0" step="0.10" />
@@ -1386,7 +1369,16 @@ function PLConfigTab({ onToast }: { onToast: (msg: string, tone?: 'green' | 'amb
     if (item.id && types.find((t) => t.id === item.id)) {
       updated = types.map((t) => (t.id === item.id ? item : t));
     } else {
-      updated = [...types, { ...item, id: `PLT-${Date.now().toString(36)}` }];
+      let maxSerial = 0;
+      for (const t of types) {
+        const m = t.id.match(/^PLT-(\d+)$/);
+        if (m) {
+          const num = parseInt(m[1], 10);
+          if (num > maxSerial) maxSerial = num;
+        }
+      }
+      const newId = `PLT-${String(maxSerial + 1).padStart(3, '0')}`;
+      updated = [...types, { ...item, id: newId }];
     }
     setTypes(updated);
     savePLTypes(updated);

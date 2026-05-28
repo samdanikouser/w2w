@@ -242,7 +242,6 @@ export default function DepotsPage() {
                   <select className="fc" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
                     <option value="ACTIVE">Active</option>
                     <option value="INACTIVE">Inactive</option>
-                    <option value="UNDER_CONSTRUCTION">Under Construction</option>
                   </select></div>
                 <div className="fg full"><label className="fl">Address</label>
                   <input className="fc" value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Street address" /></div>

@@ -510,7 +510,18 @@ export default function EmployeesPage() {
                     <option value="Other">Other</option>
                   </select>
                 </FormField>
-                <FormField label="Nationality"><input className="fc" value={formData.nationality || ''} onChange={(e) => updateField('nationality', e.target.value)} placeholder="South African" /></FormField>
+                <FormField label="Nationality">
+                  <select className="fc" value={formData.nationality || 'South African'} onChange={(e) => updateField('nationality', e.target.value)}>
+                    <option value="South African">South African</option>
+                    <option value="Zimbabwean">Zimbabwean</option>
+                    <option value="Mozambican">Mozambican</option>
+                    <option value="Lesotho">Lesotho (Basotho)</option>
+                    <option value="Swazi">Swazi</option>
+                    <option value="Namibian">Namibian</option>
+                    <option value="Botswana">Botswana (Motswana)</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </FormField>
                 <FormField label="Disability">
                   <select className="fc" value={formData.disability || 'None'} onChange={(e) => updateField('disability', e.target.value)}>
                     <option value="None">None</option>

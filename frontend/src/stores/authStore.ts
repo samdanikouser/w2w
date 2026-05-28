@@ -48,6 +48,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem('w2w_token', res.token);
       const user = mapApiUser(res.user);
       const mode = user.modules?.includes('dashboard') ? 'boh' : 'fo';
+      window.location.hash = 'dashboard';
       set({ user, isAuthenticated: true, appMode: mode });
       return true;
     } catch {
@@ -61,6 +62,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem('w2w_token', res.token);
       const user = mapApiUser(res.user);
       const mode = user.modules?.includes('dashboard') ? 'boh' : 'fo';
+      window.location.hash = 'dashboard';
       set({ user, isAuthenticated: true, appMode: mode });
       return true;
     } catch (err: any) {
@@ -75,13 +77,13 @@ export const useAuthStore = create<AuthState>((set) => ({
           throw new Error(data.error);
         }
       }
-      // If it's a network error (no response) or Vite proxy error (HTML instead of JSON)
       throw new Error(err.message || 'Network error or backend is unreachable.');
     }
   },
 
   logout: () => {
     localStorage.removeItem('w2w_token');
+    window.location.hash = '';
     set({ user: null, isAuthenticated: false, appMode: 'boh' });
   },
 

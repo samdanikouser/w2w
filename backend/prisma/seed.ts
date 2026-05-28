@@ -46,19 +46,29 @@ async function main() {
     return;
   }
 
+  const superAdminRole = await prisma.customRole.upsert({
+    where: { name: 'Super Admin' },
+    update: {},
+    create: {
+      name: 'Super Admin',
+      description: 'System Administrator with full access',
+      modules: ['dashboard','sites','epr-reports','pl-register','reports','demographics','employees','onboarding','attendance','check-in-out','beneficiary','stock-register','stock-variance','vehicles','depots','depot-scanner','training','violations','audit-log','waste-logs','w2w-settings'],
+    },
+  });
+
   const passwordHash = await bcrypt.hash(adminPassword, 12);
   const admin = await prisma.user.create({
     data: {
       email: adminEmail,
       passwordHash,
       name,
-      role: 'SUPER_ADMIN',
+      customRoleId: superAdminRole.id,
       isActive: true,
     },
   });
 
   // Seed welcome notifications for the admin
-  await prisma.notification.createMany({
+  await prisma.notifications.createMany({
     data: [
       { userId: admin.id, type: 'SUCCESS', icon: '🎉', title: 'Welcome to W2W Platform', message: 'Your account has been set up successfully.', action: 'dashboard' },
       { userId: admin.id, type: 'WARNING', icon: '🔐', title: 'Change your password', message: 'Please update your default password for security.', action: 'profile' },
