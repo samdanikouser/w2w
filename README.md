@@ -59,7 +59,7 @@ Visit <http://localhost:3000>, log in with the bootstrap admin you seeded, then 
 | --- | --- | --- |
 | Dashboard | (derived) | KPI cards + 5-tab analytics (Performance, Financial, Tons, Budget, Impact) |
 | Sites & Regions | `/api/sites` | Cooperatives, depots, buyback centres |
-| EPR Monthly Reports | `/api/epr-reports` | Compliance submissions per month |
+| EPR Monthly Reports | `/api/epr-reports`, `/api/waste-types` | Dynamic breakdown per configured Waste Types & PROs |
 | P&L Entry Register | `/api/transactions` | Revenue + expense ledger |
 | Reports & Export | (links to modules) | 8 report templates |
 | Demographics | (derived from employees) | Workforce composition charts |
@@ -72,10 +72,11 @@ Visit <http://localhost:3000>, log in with the bootstrap admin you seeded, then 
 | Vehicles & Fleet | `/api/vehicles` | Registration, service schedule, status |
 | Depot Management | `/api/sites?type=DEPOT` | Subset of sites |
 | Depot Scanner | `/api/waste-logs` | QR / manual employee lookup → log intake |
-| Training Tracker | `/api/training/modules` + `/api/training/records` | Modules + per-employee records |
+| Waste Collection | `/api/waste-logs` | Grid-based bulk entry, Depot routing, Approval workflow |
+| Training Tracker | `/api/training` | Dynamic Modules (Mandatory/Optional) & Records |
 | Warnings & Violations | `/api/violations` | Disciplinary register |
 | Audit Log | `/api/audit-logs` | Read-only POPIA trail |
-| Settings | `/api/users`, `/api/roles` | Organisation, Users, Roles, Data & POPIA |
+| Settings | `/api/users`, `/api/roles`, `/api/waste-types` | Organisation, Users, Roles, Dynamic Waste Categories (EPR pricing/PRO), Data & POPIA |
 | My Profile | `/api/auth/me`, `/api/auth/change-password` | Personal info, notifications, security |
 
 ## Security
