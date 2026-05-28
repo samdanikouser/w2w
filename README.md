@@ -101,4 +101,4 @@ Visit <http://localhost:3000>, log in with the bootstrap admin you seeded, then 
 
 ## License
 
-Proprietary — Athina Tech. All rights reserved.
+Proprietary — Elanora Systems. All rights reserved.
