@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
@@ -11,6 +11,7 @@ const wasteTypeSchema = z.object({
   category: z.string().default(''),
   unit: z.string().default('kg'),
   pricePerUnit: z.number().default(0),
+  buyer: z.string().default(''),
   colour: z.string().default('#146484'),
   isActive: z.boolean().default(true),
 });
@@ -29,7 +30,7 @@ router.get('/', async (_req, res, next) => {
 });
 
 // ── POST /api/waste-types ──
-router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('w2w-settings'), async (req: AuthRequest, res, next) => {
   try {
     const data = wasteTypeSchema.parse(req.body);
     const wt = await prisma.wasteType.create({ data });
@@ -45,7 +46,7 @@ router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest
 });
 
 // ── PUT /api/waste-types/:id ──
-router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('w2w-settings'), async (req: AuthRequest, res, next) => {
   try {
     const data = wasteTypeSchema.partial().parse(req.body);
     const wt = await prisma.wasteType.update({ where: { id: req.params.id as string }, data });
@@ -61,7 +62,7 @@ router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthReque
 });
 
 // ── DELETE /api/waste-types/:id (soft) ──
-router.delete('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('w2w-settings'), async (req: AuthRequest, res, next) => {
   try {
     await prisma.wasteType.update({ where: { id: req.params.id as string }, data: { isActive: false } });
 

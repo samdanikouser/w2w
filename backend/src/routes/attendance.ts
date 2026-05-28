@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
@@ -36,7 +36,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN', 'DATA_CLERK'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('attendance'), async (req: AuthRequest, res, next) => {
   try {
     const d = attendanceSchema.parse(req.body);
     const r = await prisma.attendance.upsert({
@@ -67,7 +67,7 @@ router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN', 'DATA_CLERK'), async (re
   }
 });
 
-router.delete('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('attendance'), async (req: AuthRequest, res, next) => {
   try {
     await prisma.attendance.delete({ where: { id: req.params.id as string } });
     res.json({ message: 'Attendance deleted' });

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
@@ -17,12 +17,18 @@ const txSchema = z.object({
 });
 
 // ── GET /api/transactions ──
-router.get('/', async (req, res, next) => {
+router.get('/', async (req: AuthRequest, res, next) => {
   try {
     const { type, siteId, month } = req.query as Record<string, string | undefined>;
     const where: any = {};
     if (type) where.type = type;
-    if (siteId) where.siteId = siteId;
+
+    // Enforce Depot-level sandboxing
+    if (req.userSiteId) {
+      where.siteId = req.userSiteId;
+    } else if (siteId) {
+      where.siteId = siteId;
+    }
     if (month) {
       const [y, m] = month.split('-').map(Number);
       where.date = { gte: new Date(y, m - 1, 1), lt: new Date(y, m, 1) };
@@ -46,7 +52,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('pl-register'), async (req: AuthRequest, res, next) => {
   try {
     const d = txSchema.parse(req.body);
     const t = await prisma.transaction.create({
@@ -69,7 +75,7 @@ router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest
   }
 });
 
-router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('pl-register'), async (req: AuthRequest, res, next) => {
   try {
     const d = txSchema.partial().parse(req.body);
     const t = await prisma.transaction.update({
@@ -89,7 +95,7 @@ router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthReque
   }
 });
 
-router.delete('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('pl-register'), async (req: AuthRequest, res, next) => {
   try {
     await prisma.transaction.delete({ where: { id: req.params.id as string } });
     await prisma.auditLog.create({

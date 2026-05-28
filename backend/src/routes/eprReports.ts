@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
@@ -16,12 +16,18 @@ const reportSchema = z.object({
   data: z.any().nullish(),
 });
 
-router.get('/', async (req, res, next) => {
+router.get('/', async (req: AuthRequest, res, next) => {
   try {
     const { year, siteId } = req.query as Record<string, string | undefined>;
     const where: any = {};
-    if (year) where.year = Number(year);
-    if (siteId) where.siteId = siteId;
+    if (year) where.year = parseInt(year);
+
+    // Enforce Depot-level sandboxing
+    if (req.userSiteId) {
+      where.siteId = req.userSiteId;
+    } else if (siteId) {
+      where.siteId = siteId;
+    }
     const reports = await prisma.eprReport.findMany({
       where,
       orderBy: [{ year: 'desc' }, { month: 'desc' }],
@@ -32,7 +38,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('epr-reports'), async (req: AuthRequest, res, next) => {
   try {
     const d = reportSchema.parse(req.body);
     const r = await prisma.eprReport.create({
@@ -56,7 +62,7 @@ router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest
   }
 });
 
-router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('epr-reports'), async (req: AuthRequest, res, next) => {
   try {
     const d = reportSchema.partial().parse(req.body);
     const r = await prisma.eprReport.update({
@@ -73,7 +79,7 @@ router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthReque
   }
 });
 
-router.delete('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('epr-reports'), async (req: AuthRequest, res, next) => {
   try {
     await prisma.eprReport.delete({ where: { id: req.params.id as string } });
     res.json({ message: 'Report deleted' });

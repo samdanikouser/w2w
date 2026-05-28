@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
@@ -18,12 +18,18 @@ const logSchema = z.object({
 });
 
 // ── GET /api/waste-logs ──
-router.get('/', async (req, res, next) => {
+router.get('/', async (req: AuthRequest, res, next) => {
   try {
     const { status, siteId, startDate, endDate, page = '1', limit = '50' } = req.query;
     const where: any = {};
     if (status && status !== 'all') where.status = status;
-    if (siteId) where.siteId = siteId;
+
+    // Enforce Depot-level sandboxing
+    if (req.userSiteId) {
+      where.siteId = req.userSiteId;
+    } else if (siteId) {
+      where.siteId = siteId;
+    }
     if (startDate || endDate) {
       where.date = {};
       if (startDate) where.date.gte = new Date(startDate as string);
@@ -110,7 +116,7 @@ router.post('/', async (req: AuthRequest, res, next) => {
 });
 
 // ── PATCH /api/waste-logs/:id/approve ──
-router.patch('/:id/approve', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.patch('/:id/approve', requireModule('waste-logs'), async (req: AuthRequest, res, next) => {
   try {
     const log = await prisma.wasteLog.update({
       where: { id: req.params.id as string },
@@ -128,7 +134,7 @@ router.patch('/:id/approve', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req:
 });
 
 // ── PATCH /api/waste-logs/:id/reject ──
-router.patch('/:id/reject', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.patch('/:id/reject', requireModule('waste-logs'), async (req: AuthRequest, res, next) => {
   try {
     const log = await prisma.wasteLog.update({
       where: { id: req.params.id as string },
@@ -146,7 +152,7 @@ router.patch('/:id/reject', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: 
 });
 
 // ── DELETE /api/waste-logs/:id ──
-router.delete('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('waste-logs'), async (req: AuthRequest, res, next) => {
   try {
     await prisma.wasteLog.delete({ where: { id: req.params.id as string } });
 

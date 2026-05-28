@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
@@ -12,7 +12,9 @@ const vehicleSchema = z.object({
   model: z.string().default(''),
   year: z.number().int().nullish(),
   siteId: z.string().nullish(),
-  status: z.enum(['OPERATIONAL', 'MAINTENANCE', 'DECOMMISSIONED']).default('OPERATIONAL'),
+  status: z.enum(['OPERATIONAL', 'ACTIVE', 'MAINTENANCE', 'UNDER_REPAIR', 'DECOMMISSIONED', 'INACTIVE']).default('OPERATIONAL'),
+  condition: z.string().default('Good'),
+  assignedTo: z.string().default(''),
   fuelType: z.string().default(''),
   lastService: z.string().nullish(),
   nextService: z.string().nullish(),
@@ -33,7 +35,7 @@ router.get('/', async (_req, res, next) => {
 });
 
 // ── POST /api/vehicles ──
-router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('vehicles'), async (req: AuthRequest, res, next) => {
   try {
     const data = vehicleSchema.parse(req.body);
     const v = await prisma.vehicle.create({
@@ -44,6 +46,8 @@ router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest
         year: data.year ?? null,
         siteId: data.siteId || null,
         status: data.status as any,
+        condition: data.condition,
+        assignedTo: data.assignedTo,
         fuelType: data.fuelType,
         lastService: data.lastService ? new Date(data.lastService) : null,
         nextService: data.nextService ? new Date(data.nextService) : null,
@@ -62,7 +66,7 @@ router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest
 });
 
 // ── PUT /api/vehicles/:id ──
-router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('vehicles'), async (req: AuthRequest, res, next) => {
   try {
     const data = vehicleSchema.partial().parse(req.body);
     const v = await prisma.vehicle.update({
@@ -86,7 +90,7 @@ router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthReque
 });
 
 // ── DELETE /api/vehicles/:id ──
-router.delete('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('vehicles'), async (req: AuthRequest, res, next) => {
   try {
     await prisma.vehicle.delete({ where: { id: req.params.id as string } });
 

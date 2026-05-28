@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { employeesApi, wasteLogsApi, type EmployeePayload } from '../api/endpoints';
+import { employeesApi, wasteLogsApi, rolesApi, sitesApi, type EmployeePayload } from '../api/endpoints';
 import { useNavStore } from '../stores/navStore';
 import { exportCsv } from '../utils/csv';
 import {
   Plus, Search, Download,
   Edit2, Trash2, Eye, X, CreditCard, Filter,
-  Printer, Recycle,
+  Printer, Recycle, CheckCircle,
 } from 'lucide-react';
+
+import { loadSettings } from '../utils/programmeSettings';
 
 const STATUS_STYLES: Record<string, string> = {
   ACTIVE: 'badge bg',
@@ -23,8 +25,6 @@ const STATUS_LABELS: Record<string, string> = {
   PROBATION: 'Probation',
 };
 
-const DEPARTMENTS = ['Collections', 'Sorting', 'Admin', 'Transport', 'Security', 'Management'];
-const ROLES = ['Collector', 'Sorter', 'Driver', 'Supervisor', 'Admin Officer', 'Manager', 'Security Guard'];
 const STATUSES = ['ACTIVE', 'ON_LEAVE', 'TERMINATED', 'PROBATION'];
 
 const EMPTY_FORM: EmployeePayload = {
@@ -43,6 +43,28 @@ const EMPTY_FORM: EmployeePayload = {
   bankName: '',
   bankAccount: '',
   bankBranch: '',
+  dateOfBirth: '',
+  gender: '',
+  race: '',
+  nationality: 'South African',
+  disability: 'None',
+  bloodGroup: 'Unknown',
+  epwpRefNo: '',
+  epwpEnrolmentDate: '',
+  epwpYouth: false,
+  stipend: 0,
+  serviceFee: 0,
+  attendancePct: 100,
+  exitDate: '',
+  exitReason: '',
+  incomeBeforeW2W: 0,
+  currentAddress: '',
+  permanentAddress: '',
+  emergencyName: '',
+  emergencyRelationship: '',
+  emergencyPhone: '',
+  customRoleId: '',
+  loginPassword: '',
 };
 
 const VIEW_TABS = [
@@ -82,6 +104,11 @@ export default function EmployeesPage() {
   const [viewTab, setViewTab] = useState('personal');
   const [formData, setFormData] = useState<EmployeePayload>(EMPTY_FORM);
 
+  const settings = useMemo(() => loadSettings(), []);
+  const DEPARTMENTS = settings.departments;
+  const ROLES = settings.designations;
+  const BANKS = settings.banks;
+
   // ── Queries ──
   const { data, isLoading } = useQuery({
     queryKey: ['employees', searchQuery, filterStatus, filterDept],
@@ -98,6 +125,16 @@ export default function EmployeesPage() {
   const { data: wasteLogsData } = useQuery({
     queryKey: ['waste-logs', 'all'],
     queryFn: () => wasteLogsApi.list({}),
+  });
+
+  const { data: customRoles } = useQuery({
+    queryKey: ['roles'],
+    queryFn: () => rolesApi.list(),
+  });
+
+  const { data: sitesData = [] } = useQuery({
+    queryKey: ['sites'],
+    queryFn: () => sitesApi.list(),
   });
   const allLogs: any[] = wasteLogsData?.data || [];
 
@@ -146,12 +183,17 @@ export default function EmployeesPage() {
     setShowModal(true);
   };
 
-  // Open the Add modal if another page navigated us here with that intent
+  // Open the Add/Edit modal if another page navigated us here with that intent
   useEffect(() => {
     const action = consumePendingAction();
     if (action === 'openAdd') openAdd();
+    else if (action?.startsWith('edit:')) {
+      const empId = action.slice(5);
+      const emp = employees.find((e: any) => e.id === empId);
+      if (emp) openEdit(emp);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [employees]);
 
   const openEdit = (emp: any) => {
     setEditingId(emp.id);
@@ -171,6 +213,28 @@ export default function EmployeesPage() {
       bankName: emp.bankName || '',
       bankAccount: emp.bankAccount || '',
       bankBranch: emp.bankBranch || '',
+      dateOfBirth: emp.dateOfBirth ? emp.dateOfBirth.split('T')[0] : '',
+      gender: emp.gender || '',
+      race: emp.race || '',
+      nationality: emp.nationality || 'South African',
+      disability: emp.disability || 'None',
+      bloodGroup: emp.bloodGroup || 'Unknown',
+      epwpRefNo: emp.epwpRefNo || '',
+      epwpEnrolmentDate: emp.epwpEnrolmentDate ? emp.epwpEnrolmentDate.split('T')[0] : '',
+      epwpYouth: emp.epwpYouth || false,
+      stipend: emp.stipend || 0,
+      serviceFee: emp.serviceFee || 0,
+      attendancePct: emp.attendancePct ?? 100,
+      exitDate: emp.exitDate ? emp.exitDate.split('T')[0] : '',
+      exitReason: emp.exitReason || '',
+      incomeBeforeW2W: emp.incomeBeforeW2W || 0,
+      currentAddress: emp.currentAddress || '',
+      permanentAddress: emp.permanentAddress || '',
+      emergencyName: emp.emergencyName || '',
+      emergencyRelationship: emp.emergencyRelationship || '',
+      emergencyPhone: emp.emergencyPhone || '',
+      customRoleId: '', // Fetching existing user's role is complex, typically handled in Users page
+      loginPassword: '',
     });
     setShowModal(true);
   };
@@ -305,6 +369,9 @@ export default function EmployeesPage() {
         </div>
       </div>
 
+
+
+
       {/* ══ Table ══ */}
       <div className="card">
         <div className="tw">
@@ -408,12 +475,13 @@ export default function EmployeesPage() {
       {/* ══ ADD/EDIT MODAL ══ */}
       {showModal && (
         <div className="modal-ov open">
-          <div className="modal" style={{ width: 700 }}>
+          <div className="modal" style={{ width: 780, maxHeight: '90vh' }}>
             <div className="mh">
               <span className="mt">{editingId ? 'Edit Employee' : 'Add New Employee'}</span>
               <button onClick={() => setShowModal(false)} className="mc"><X size={15} /></button>
             </div>
-            <div className="mb">
+            <div className="mb" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+              {/* ── Personal Information ── */}
               <div className="fsec">Personal Information</div>
               <div className="fgrid">
                 <FormField label="First Name" required><input className="fc" value={formData.firstName} onChange={(e) => updateField('firstName', e.target.value)} placeholder="Enter first name" /></FormField>
@@ -422,8 +490,53 @@ export default function EmployeesPage() {
                 <FormField label="Email"><input className="fc" type="email" value={formData.email || ''} onChange={(e) => updateField('email', e.target.value)} placeholder="email@example.com" /></FormField>
                 <FormField label="Phone"><input className="fc" value={formData.phone || ''} onChange={(e) => updateField('phone', e.target.value)} placeholder="082 xxx xxxx" /></FormField>
                 <FormField label="Employee Number"><input className="fc" value={formData.empNo} onChange={(e) => updateField('empNo', e.target.value)} placeholder="W2W-0001" /></FormField>
+                <FormField label="Date of Birth"><input className="fc" type="date" value={formData.dateOfBirth || ''} onChange={(e) => updateField('dateOfBirth', e.target.value)} /></FormField>
+                <FormField label="Gender">
+                  <select className="fc" value={formData.gender || ''} onChange={(e) => updateField('gender', e.target.value)}>
+                    <option value="">Select gender</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Non-binary">Non-binary</option>
+                  </select>
+                </FormField>
+                <FormField label="Race (EE Reporting)">
+                  <select className="fc" value={formData.race || ''} onChange={(e) => updateField('race', e.target.value)}>
+                    <option value="">Select race</option>
+                    <option value="Black African">Black African</option>
+                    <option value="White">White</option>
+                    <option value="Coloured">Coloured</option>
+                    <option value="Indian">Indian</option>
+                    <option value="Asian">Asian</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </FormField>
+                <FormField label="Nationality"><input className="fc" value={formData.nationality || ''} onChange={(e) => updateField('nationality', e.target.value)} placeholder="South African" /></FormField>
+                <FormField label="Disability">
+                  <select className="fc" value={formData.disability || 'None'} onChange={(e) => updateField('disability', e.target.value)}>
+                    <option value="None">None</option>
+                    <option value="Physical">Physical</option>
+                    <option value="Visual">Visual</option>
+                    <option value="Hearing">Hearing</option>
+                    <option value="Intellectual">Intellectual</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </FormField>
+                <FormField label="Blood Group">
+                  <select className="fc" value={formData.bloodGroup || 'Unknown'} onChange={(e) => updateField('bloodGroup', e.target.value)}>
+                    <option value="Unknown">Unknown</option>
+                    <option value="A+">A+</option>
+                    <option value="A-">A-</option>
+                    <option value="B+">B+</option>
+                    <option value="B-">B-</option>
+                    <option value="AB+">AB+</option>
+                    <option value="AB-">AB-</option>
+                    <option value="O+">O+</option>
+                    <option value="O-">O-</option>
+                  </select>
+                </FormField>
               </div>
 
+              {/* ── Employment Details ── */}
               <div className="fsec">Employment Details</div>
               <div className="fgrid">
                 <FormField label="Department">
@@ -438,6 +551,12 @@ export default function EmployeesPage() {
                     {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </FormField>
+                <FormField label="Assigned Depot / Site">
+                  <select className="fc" value={formData.siteId || ''} onChange={(e) => updateField('siteId', e.target.value || null)}>
+                    <option value="">No Site (Global/HQ)</option>
+                    {sitesData.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </FormField>
                 <FormField label="Status">
                   <select className="fc" value={formData.status || 'ACTIVE'} onChange={(e) => updateField('status', e.target.value)}>
                     {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
@@ -447,11 +566,105 @@ export default function EmployeesPage() {
                 <FormField label="Daily Rate (R)"><input className="fc" type="number" value={formData.dailyRate || ''} onChange={(e) => updateField('dailyRate', parseFloat(e.target.value) || 0)} placeholder="0.00" /></FormField>
               </div>
 
+              {/* ── EPWP Enrolment ── */}
+              <div className="fsec">EPWP Enrolment</div>
+              <div className="fgrid">
+                <FormField label="EPWP Reference No."><input className="fc" value={formData.epwpRefNo || ''} onChange={(e) => updateField('epwpRefNo', e.target.value)} placeholder="EPWP ref number" /></FormField>
+                <FormField label="Enrolment Date"><input className="fc" type="date" value={formData.epwpEnrolmentDate || ''} onChange={(e) => updateField('epwpEnrolmentDate', e.target.value)} /></FormField>
+                <FormField label="Youth (Under 35)">
+                  <select className="fc" value={formData.epwpYouth ? 'Yes' : 'No'} onChange={(e) => updateField('epwpYouth', e.target.value === 'Yes')}>
+                    <option value="No">No</option>
+                    <option value="Yes">Yes</option>
+                  </select>
+                </FormField>
+              </div>
+
+              {/* ── Remuneration ── */}
+              <div className="fsec">Remuneration</div>
+              <div className="fgrid">
+                <FormField label="Stipend (R)"><input className="fc" type="number" value={formData.stipend || ''} onChange={(e) => updateField('stipend', parseFloat(e.target.value) || 0)} placeholder="0.00" /></FormField>
+                <FormField label="Service Fee (R)"><input className="fc" type="number" value={formData.serviceFee || ''} onChange={(e) => updateField('serviceFee', parseFloat(e.target.value) || 0)} placeholder="0.00" /></FormField>
+                <FormField label="Attendance %"><input className="fc" type="number" min={0} max={100} value={formData.attendancePct ?? ''} onChange={(e) => updateField('attendancePct', parseFloat(e.target.value) || 0)} placeholder="100" /></FormField>
+              </div>
+
+              {/* ── Exit (editing only) ── */}
+              {editingId && (
+                <>
+                  <div className="fsec">Exit</div>
+                  <div className="fgrid">
+                    <FormField label="Exit Date"><input className="fc" type="date" value={formData.exitDate || ''} onChange={(e) => updateField('exitDate', e.target.value)} /></FormField>
+                    <FormField label="Exit Reason">
+                      <select className="fc" value={formData.exitReason || ''} onChange={(e) => updateField('exitReason', e.target.value)}>
+                        <option value="">Select reason</option>
+                        <option value="Resigned">Resigned</option>
+                        <option value="Dropped Out">Dropped Out</option>
+                        <option value="Dismissed">Dismissed</option>
+                        <option value="Health">Health</option>
+                        <option value="Relocated">Relocated</option>
+                        <option value="Deceased">Deceased</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </FormField>
+                  </div>
+                </>
+              )}
+
+              {/* ── Income Uplift ── */}
+              <div className="fsec">Income Uplift</div>
+              <div className="fgrid">
+                <FormField label="Monthly Income BEFORE joining W2W (R)"><input className="fc" type="number" value={formData.incomeBeforeW2W || ''} onChange={(e) => updateField('incomeBeforeW2W', parseFloat(e.target.value) || 0)} placeholder="e.g. 800" /></FormField>
+              </div>
+
+              {/* ── Contact Details ── */}
+              <div className="fsec">Contact Details</div>
+              <div className="fgrid">
+                <FormField label="Current Address"><textarea className="fc" rows={2} value={formData.currentAddress || ''} onChange={(e) => updateField('currentAddress', e.target.value)} placeholder="Current residential address" style={{ resize: 'vertical', minHeight: 48 }} /></FormField>
+                <FormField label="Permanent Address"><textarea className="fc" rows={2} value={formData.permanentAddress || ''} onChange={(e) => updateField('permanentAddress', e.target.value)} placeholder="Permanent address (if different)" style={{ resize: 'vertical', minHeight: 48 }} /></FormField>
+              </div>
+
+              {/* ── Emergency Contact ── */}
+              <div className="fsec">Emergency Contact</div>
+              <div className="fgrid">
+                <FormField label="Name"><input className="fc" value={formData.emergencyName || ''} onChange={(e) => updateField('emergencyName', e.target.value)} placeholder="Emergency contact name" /></FormField>
+                <FormField label="Relationship">
+                  <select className="fc" value={formData.emergencyRelationship || ''} onChange={(e) => updateField('emergencyRelationship', e.target.value)}>
+                    <option value="">Select relationship</option>
+                    <option value="Spouse">Spouse</option>
+                    <option value="Parent">Parent</option>
+                    <option value="Sibling">Sibling</option>
+                    <option value="Friend">Friend</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </FormField>
+                <FormField label="Phone"><input className="fc" type="tel" value={formData.emergencyPhone || ''} onChange={(e) => updateField('emergencyPhone', e.target.value)} placeholder="082 xxx xxxx" /></FormField>
+              </div>
+
+              {/* ── Banking Details ── */}
               <div className="fsec">Banking Details</div>
               <div className="fgrid3">
-                <FormField label="Bank Name"><input className="fc" value={formData.bankName || ''} onChange={(e) => updateField('bankName', e.target.value)} placeholder="e.g. FNB" /></FormField>
+                <FormField label="Bank Name">
+                  <select className="fc" value={formData.bankName || ''} onChange={(e) => updateField('bankName', e.target.value)}>
+                    <option value="">Select bank</option>
+                    {BANKS.map((b) => <option key={b} value={b}>{b}</option>)}
+                    {!BANKS.includes('Other') && <option value="Other">Other</option>}
+                  </select>
+                </FormField>
                 <FormField label="Account Number"><input className="fc" value={formData.bankAccount || ''} onChange={(e) => updateField('bankAccount', e.target.value)} placeholder="Account number" /></FormField>
                 <FormField label="Branch Code"><input className="fc" value={formData.bankBranch || ''} onChange={(e) => updateField('bankBranch', e.target.value)} placeholder="Branch code" /></FormField>
+              </div>
+
+              {/* ── System Access ── */}
+              <div className="fsec">System Access</div>
+              <div className="fgrid">
+                <FormField label="System Role (Custom)">
+                  <select className="fc" value={formData.customRoleId || ''} onChange={(e) => updateField('customRoleId', e.target.value)}>
+                    <option value="">Select role</option>
+                    {customRoles?.map((r: any) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="Login Password"><input className="fc" type="text" value={formData.loginPassword || ''} onChange={(e) => updateField('loginPassword', e.target.value)} placeholder="Set login password" /></FormField>
               </div>
             </div>
             <div className="mf">
@@ -526,7 +739,7 @@ export default function EmployeesPage() {
       {/* ══ ID CARD MODAL (print-friendly) ══ */}
       {showIdCardModal && viewingEmployee && (
         <div className="modal-ov open">
-          <div className="modal" style={{ width: 500 }}>
+          <div className="modal" style={{ width: 720 }}>
             <div className="mh">
               <span className="mt">Employee ID Card</span>
               <button onClick={() => setShowIdCardModal(false)} className="mc"><X size={15} /></button>

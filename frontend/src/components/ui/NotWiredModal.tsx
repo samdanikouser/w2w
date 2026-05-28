@@ -17,7 +17,7 @@ export default function NotWiredModal({ open, onClose, title, module, apiPath, d
   if (!open) return null;
   return (
     <div className="modal-ov open" onClick={onClose}>
-      <div className="modal" style={{ width: 520 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal" style={{ width: 720 }} onClick={(e) => e.stopPropagation()}>
         <div className="mh">
           <span className="mt">{title}</span>
           <button onClick={onClose} className="mc"><X size={15} /></button>

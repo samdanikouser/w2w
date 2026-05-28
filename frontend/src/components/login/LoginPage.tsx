@@ -1,12 +1,37 @@
 import { useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
+import { authApi } from '../../api/endpoints';
 
-export default function LoginPage() {
+export default function LoginPage({ onGoToRegister }: { onGoToRegister?: () => void }) {
   const { login } = useAuthStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Forgot password state
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotResult, setForgotResult] = useState<{ message: string; tempPassword?: string } | null>(null);
+  const [forgotError, setForgotError] = useState('');
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError('');
+    setForgotResult(null);
+    setForgotLoading(true);
+    try {
+      const result = await authApi.forgotPassword(forgotEmail);
+      setForgotResult(result);
+    } catch (err: any) {
+      setForgotError(err?.response?.data?.error || 'Failed to reset password. Please try again.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,37 +123,42 @@ export default function LoginPage() {
             </video>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-            <div
-              style={{
-                background: 'white',
-                padding: '4px 8px',
-                borderRadius: 8,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <img src="/athina_logo.jpg" alt="Athina Tech" style={{ height: 22, width: 'auto', objectFit: 'contain', display: 'block' }} />
-            </div>
-            <div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: 'white', letterSpacing: '-0.03em', lineHeight: 1 }}>W2W</div>
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                Waste to Work
+
+
+          <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', lineHeight: 1.6, margin: '0 0 18px' }}>
+            A complete workforce &amp; waste management platform for sustainable operations in South Africa.
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            {[
+              'Employee lifecycle management & onboarding',
+              'Real-time waste collection & depot tracking',
+              'Fleet & electric vehicle management',
+              'PPE, uniform & tool allocation',
+              'ID cards & field SOS reporting',
+            ].map((feature) => (
+              <div key={feature} style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, color: 'rgba(255,255,255,0.6)' }}>
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: 'var(--color-accent)',
+                    flexShrink: 0,
+                  }}
+                />
+                {feature}
               </div>
-              <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.2)', marginTop: 2, letterSpacing: '0.04em' }}>
-                Powered by Athina
-              </div>
-            </div>
+            ))}
           </div>
 
-          <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', lineHeight: 1.6, margin: 0 }}>
-            EPWP Waste Recycling Programme Management Platform for the City of Johannesburg.
-          </p>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 20, letterSpacing: '0.02em', textAlign: 'center' }}>
+            © 2026 Waste To Work &nbsp;·&nbsp; Powered by Elanora Systems
+          </div>
         </div>
 
         {/* ── RIGHT: Sign-in form ── */}
-        <div className="login-form-panel" style={{ padding: 36, borderRadius: '0 24px 24px 0' }}>
+        <div className="login-form-panel" style={{ padding: 36, borderRadius: '0 24px 24px 0', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: 'white', marginBottom: 6 }}>Sign In</div>
           <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 24 }}>
             Enter your credentials to access the platform
@@ -202,26 +232,63 @@ export default function LoginPage() {
               >
                 Password
               </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="current-password"
-                required
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  background: 'rgba(255,255,255,0.07)',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  borderRadius: 9,
-                  fontSize: 13,
-                  fontFamily: 'var(--font-sans)',
-                  color: 'white',
-                  outline: 'none',
-                  transition: 'border 0.2s',
-                }}
-              />
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '10px 42px 10px 14px',
+                    background: 'rgba(255,255,255,0.07)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    borderRadius: 9,
+                    fontSize: 13,
+                    fontFamily: 'var(--font-sans)',
+                    color: 'white',
+                    outline: 'none',
+                    transition: 'border 0.2s',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((s) => !s)}
+                  tabIndex={-1}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    right: 10,
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'rgba(255,255,255,0.45)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: 4,
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.85)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.45)')}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', marginBottom: 6 }}>
+              <button
+                type="button"
+                onClick={() => { setShowForgot(true); setForgotEmail(email); setForgotResult(null); setForgotError(''); }}
+                style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', fontSize: 11, cursor: 'pointer', padding: 0 }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.85)')}
+                onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.5)')}
+              >
+                Forgot password?
+              </button>
             </div>
 
             <button
@@ -245,6 +312,18 @@ export default function LoginPage() {
             >
               {isLoading ? 'Signing in…' : 'Access Platform →'}
             </button>
+
+            {onGoToRegister && (
+              <div style={{ textAlign: 'center', marginTop: '10px' }}>
+                <button
+                  type="button"
+                  onClick={onGoToRegister}
+                  style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: '13px', cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  Need to register an organization?
+                </button>
+              </div>
+            )}
           </form>
 
           <div
@@ -252,25 +331,92 @@ export default function LoginPage() {
           >
             🔒 POPIA Compliant · Secured · Built for South Africa
           </div>
-        </div>
-      </div>
 
-      <div
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          padding: '7px 20px',
-          textAlign: 'center',
-          background: 'rgba(10,30,40,0.85)',
-          backdropFilter: 'blur(10px)',
-          borderTop: '1px solid rgba(255,255,255,0.1)',
-          zIndex: 10000,
-        }}
-      >
-        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', letterSpacing: '0.04em' }}>
-          © 2026 Waste To Work &nbsp;·&nbsp; Powered by Athina Tech
+          {/* ── Forgot Password Modal ── */}
+          {showForgot && (
+            <div
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10001 }}
+              onClick={() => setShowForgot(false)}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: 'linear-gradient(160deg, rgba(10,40,60,0.95) 0%, rgba(15,50,70,0.98) 100%)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: 16,
+                  padding: 28,
+                  width: 400,
+                  maxWidth: '90vw',
+                  backdropFilter: 'blur(20px)',
+                  boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+                }}
+              >
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'white', marginBottom: 6 }}>Reset Password</div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 20 }}>
+                  Enter your email to receive a temporary password.
+                </div>
+
+                {forgotError && (
+                  <div style={{ background: 'rgba(192,57,43,0.2)', border: '1px solid rgba(192,57,43,0.4)', borderRadius: 8, padding: '10px 12px', fontSize: 12, color: '#ff8a7a', marginBottom: 12 }}>
+                    {forgotError}
+                  </div>
+                )}
+
+                {forgotResult && (
+                  <div style={{ background: 'rgba(46,204,113,0.15)', border: '1px solid rgba(46,204,113,0.3)', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, color: '#2ecc71', marginBottom: 6 }}>{forgotResult.message}</div>
+                    {forgotResult.tempPassword && (
+                      <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'white', background: 'rgba(255,255,255,0.1)', padding: '8px 12px', borderRadius: 6, letterSpacing: '0.05em', fontWeight: 700 }}>
+                        {forgotResult.tempPassword}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginTop: 8 }}>
+                      Use this password to sign in, then change it in Profile → Security.
+                    </div>
+                  </div>
+                )}
+
+                {!forgotResult && (
+                  <form onSubmit={handleForgotPassword}>
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.5)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6 }}>
+                        Email Address
+                      </label>
+                      <input
+                        type="email"
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        placeholder="you@organisation.com"
+                        required
+                        autoFocus
+                        style={{ width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 9, fontSize: 13, color: 'white', outline: 'none' }}
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      style={{ width: '100%', padding: 11, background: 'var(--color-accent)', border: 'none', borderRadius: 9, color: 'var(--color-ink)', fontSize: 13, fontWeight: 700, cursor: forgotLoading ? 'wait' : 'pointer', opacity: forgotLoading ? 0.7 : 1 }}
+                    >
+                      {forgotLoading ? 'Resetting…' : 'Reset Password'}
+                    </button>
+                  </form>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setShowForgot(false)}
+                  style={{ width: '100%', marginTop: 10, padding: 9, background: 'none', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 9, color: 'rgba(255,255,255,0.6)', fontSize: 12, cursor: 'pointer' }}
+                >
+                  {forgotResult ? 'Back to Sign In' : 'Cancel'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div
+            style={{ textAlign: 'center', fontSize: 10, color: 'rgba(255,255,255,0.2)', marginTop: 12, display: 'none' }}
+          >
+          </div>
         </div>
       </div>
     </div>

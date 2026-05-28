@@ -1,25 +1,45 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
 
 const siteSchema = z.object({
   name: z.string().min(1),
-  type: z.enum(['COOPERATIVE', 'DEPOT', 'BUYBACK_CENTRE']).default('COOPERATIVE'),
+  type: z.string().default('IWMC'),
   region: z.string().default(''),
   address: z.string().default(''),
   lat: z.number().nullish(),
   lng: z.number().nullish(),
   status: z.enum(['ACTIVE', 'INACTIVE']).default('ACTIVE'),
+  ward: z.string().optional().default(''),
+  gps: z.string().optional().default(''),
+  supervisor: z.string().optional().default(''),
+  beneficiaries: z.number().optional().default(0),
+  ohsRating: z.number().optional().default(80),
+  monthlyTonnage: z.number().optional().default(0),
+  phase: z.string().optional().default(''),
+  focus: z.string().optional().default(''),
+  cleanliness: z.string().optional().default(''),
+  launched: z.string().optional().default(''),
+  notes: z.string().optional().default(''),
+  provinceId: z.string().optional().default(''),
+  municipalityId: z.string().optional().default(''),
+  subRegionId: z.string().optional().default(''),
 });
 
 // ── GET /api/sites ──
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req: AuthRequest, res, next) => {
   try {
+    const where: any = {};
+    if (req.userSiteId) {
+      where.id = req.userSiteId;
+    }
+
     const sites = await prisma.site.findMany({
+      where,
       orderBy: { name: 'asc' },
       include: { _count: { select: { employees: true, wasteLogs: true } } },
     });
@@ -30,7 +50,7 @@ router.get('/', async (_req, res, next) => {
 });
 
 // ── POST /api/sites ──
-router.post('/', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.post('/', async (req: AuthRequest, res, next) => {
   try {
     const data = siteSchema.parse(req.body);
     const site = await prisma.site.create({
@@ -48,12 +68,12 @@ router.post('/', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) =
 });
 
 // ── PUT /api/sites/:id ──
-router.put('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.put('/:id', async (req: AuthRequest, res, next) => {
   try {
     const data = siteSchema.partial().parse(req.body);
     const site = await prisma.site.update({
       where: { id: req.params.id as string },
-      data: { ...data, lat: data.lat || undefined, lng: data.lng || undefined },
+      data: { ...data, lat: data.lat || undefined, lng: data.lng || undefined, type: data.type as any, status: data.status as any } as any,
     });
 
     await prisma.auditLog.create({
@@ -67,7 +87,7 @@ router.put('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next)
 });
 
 // ── DELETE /api/sites/:id ──
-router.delete('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', async (req: AuthRequest, res, next) => {
   try {
     await prisma.site.delete({ where: { id: req.params.id as string } });
 

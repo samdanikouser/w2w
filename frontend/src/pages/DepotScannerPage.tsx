@@ -1,236 +1,552 @@
 import { useMemo, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { employeesApi, wasteTypesApi, sitesApi, wasteLogsApi } from '../api/endpoints';
-import { ScanLine, CheckCircle2, X } from 'lucide-react';
-import { StatCard } from './SitesPage';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { employeesApi, sitesApi, wasteLogsApi, wasteTypesApi } from '../api/endpoints';
+
+function genDN() {
+  return 'DN-' + String(Math.floor(Math.random() * 90000) + 10000);
+}
 
 export default function DepotScannerPage() {
   const qc = useQueryClient();
-  const [code, setCode] = useState('');
-  const [matched, setMatched] = useState<any>(null);
-  const [siteId, setSiteId] = useState('');
-  const [typeId, setTypeId] = useState('');
-  const [qty, setQty] = useState('');
-  const [price, setPrice] = useState('');
-  const [toast, setToast] = useState<string | null>(null);
 
-  const { data: empData } = useQuery({ queryKey: ['employees', 'all'], queryFn: () => employeesApi.list({}) });
-  const { data: typesData = [] } = useQuery({ queryKey: ['waste-types'], queryFn: () => wasteTypesApi.list() });
-  const { data: sitesData = [] } = useQuery({ queryKey: ['sites'], queryFn: () => sitesApi.list() });
-  const { data: logData } = useQuery({ queryKey: ['waste-logs', 'today'], queryFn: () => wasteLogsApi.list({}) });
+  /* ─── state ─── */
+  const [scanId, setScanId] = useState('');
+  const [foundEmployee, setFoundEmployee] = useState<any>(null);
+  const [notFound, setNotFound] = useState<string | null>(null);
+  const [depotId, setDepotId] = useState('');
+  const [wasteInputs, setWasteInputs] = useState<Record<string, number>>({});
+  const [notes, setNotes] = useState('');
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const employees: any[] = empData?.data || [];
-  const wasteTypes: any[] = Array.isArray(typesData) ? (typesData as any[]) : (typesData as any)?.data || [];
-  const sites: any[] = Array.isArray(sitesData) ? (sitesData as any[]) : (sitesData as any)?.data || [];
-  const logs: any[] = logData?.data || [];
-
-  const today = new Date().toISOString().slice(0, 10);
-  const todayLogs = useMemo(() => logs.filter((l: any) => l.date?.startsWith(today)), [logs, today]);
-  const todayKg = todayLogs.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
-  const todayValue = todayLogs.reduce((s, l) => s + (Number(l.totalValue) || 0), 0);
-
-  const createMut = useMutation({
-    mutationFn: () => wasteLogsApi.create({
-      date: today,
-      siteId: siteId || null,
-      wasteTypeId: typeId || null,
-      quantity: parseFloat(qty) || 0,
-      pricePerUnit: parseFloat(price) || 0,
-      collectorId: matched?.id || null,
-    }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['waste-logs'] });
-      setToast(`Logged ${qty} kg for ${matched?.firstName} ${matched?.lastName}.`);
-      setQty(''); setPrice(''); setTypeId(''); setMatched(null); setCode('');
-      setTimeout(() => setToast(null), 4000);
-    },
+  /* ─── queries ─── */
+  const { data: empData } = useQuery({
+    queryKey: ['employees', 'all'],
+    queryFn: () => employeesApi.list({}),
+  });
+  const { data: sitesData = [] } = useQuery({
+    queryKey: ['sites'],
+    queryFn: () => sitesApi.list(),
+  });
+  const { data: logData } = useQuery({
+    queryKey: ['waste-logs', 'today'],
+    queryFn: () => wasteLogsApi.list({}),
+  });
+  const { data: wasteTypesData = [] } = useQuery({
+    queryKey: ['waste-types'],
+    queryFn: () => wasteTypesApi.list(),
   });
 
+  const employees: any[] = empData?.data || [];
+  const sites: any[] = Array.isArray(sitesData) ? sitesData : (sitesData as any)?.data || [];
+  const logs: any[] = logData?.data || [];
+
+  const wasteTypes = Array.isArray(wasteTypesData) ? wasteTypesData : (wasteTypesData as any)?.data || [];
+
+  /* depots / buyback centres */
+  const depots = useMemo(
+    () => sites.filter((s: any) => s.type === 'DEPOT' || s.type === 'BUYBACK_CENTRE'),
+    [sites],
+  );
+
+  /* today's logs */
+  const today = new Date().toISOString().slice(0, 10);
+  const todayLogs = useMemo(() => {
+    const dailyLogs = logs
+      .filter((l: any) => l.date?.startsWith(today) || l.createdAt?.startsWith(today))
+      .sort((a: any, b: any) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
+
+    // Group by DN Ref
+    const grouped = new Map<string, any>();
+    dailyLogs.forEach((l: any) => {
+      const dnMatch = l.notes?.match(/Ref:\s*(DN-\d+)/);
+      const dnRef = dnMatch ? dnMatch[1] : `TEMP-${l.id}`;
+      
+      if (!grouped.has(dnRef)) {
+        grouped.set(dnRef, { ...l, dnRef, totalQuantity: 0, categories: [] });
+      }
+      
+      const g = grouped.get(dnRef);
+      g.totalQuantity += Number(l.quantity) || 0;
+      g.categories.push(l);
+    });
+    
+    return Array.from(grouped.values());
+  }, [logs, today]);
+
+  /* ─── derived ─── */
+  const totalKg = useMemo(
+    () => Object.values(wasteInputs).reduce((s, v) => s + v, 0),
+    [wasteInputs],
+  );
+  const totalValue = useMemo(
+    () => wasteTypes.reduce((s: number, c: any) => s + (wasteInputs[c.id] || 0) * (c.pricePerUnit || 0), 0),
+    [wasteInputs, wasteTypes],
+  );
+
+  /* ─── mutation ─── */
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const resetForm = () => {
+    setFoundEmployee(null);
+    setScanId('');
+    setNotFound(null);
+    setDepotId('');
+    setNotes('');
+    setWasteInputs({});
+  };
+
+  /* ─── helpers ─── */
+
+
   const lookup = () => {
-    const query = code.trim().toLowerCase();
-    if (!query) return;
-    const emp = employees.find(
-      (e: any) =>
-        e.empNo?.toLowerCase() === query ||
-        e.id?.toLowerCase() === query ||
-        `${e.firstName} ${e.lastName}`.toLowerCase() === query,
+    const q = scanId.trim().toLowerCase();
+    if (!q) return;
+    const emp = employees.find((e: any) => 
+      e.empNo?.toLowerCase() === q || 
+      `${e.firstName} ${e.lastName}`.toLowerCase().includes(q)
     );
     if (emp) {
-      setMatched(emp);
-      setToast(null);
+      setFoundEmployee(emp);
+      setNotFound(null);
     } else {
-      setMatched(null);
-      setToast(`No employee found for "${code}".`);
-      setTimeout(() => setToast(null), 4000);
+      setFoundEmployee(null);
+      setNotFound(scanId.trim());
     }
   };
 
-  const onTypeChange = (id: string) => {
-    setTypeId(id);
-    const t = wasteTypes.find((w: any) => w.id === id);
-    if (t?.pricePerUnit != null) setPrice(String(t.pricePerUnit));
+  const submit = async () => {
+    if (!foundEmployee || totalKg <= 0) return;
+    setIsSubmitting(true);
+
+    try {
+      const dnRef = genDN();
+      
+      const activeCats = wasteTypes.filter((c: any) => wasteInputs[c.id] > 0);
+      
+      const promises = activeCats.map((c: any) => {
+        const qty = wasteInputs[c.id];
+        const noteStr = [
+          `Ref: ${dnRef}`,
+          notes ? `Notes: ${notes}` : '',
+        ].filter(Boolean).join(' | ');
+
+        return wasteLogsApi.create({
+          date: today,
+          siteId: depotId || null,
+          quantity: qty,
+          unit: c.unit || 'kg',
+          pricePerUnit: c.pricePerUnit,
+          wasteTypeId: c.id,
+          collectorId: foundEmployee.id,
+          notes: noteStr,
+        });
+      });
+
+      await Promise.all(promises);
+      
+      qc.invalidateQueries({ queryKey: ['waste-logs'] });
+      setSuccessMsg(`Collection logged — ${totalKg} kg · R ${totalValue.toFixed(2)} · ${dnRef}`);
+      resetForm();
+      setTimeout(() => setSuccessMsg(null), 5000);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to submit collection.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const submit = () => {
-    if (!matched || !typeId || !qty) return;
-    createMut.mutate();
+  const setWaste = (code: string, val: number) => {
+    setWasteInputs((prev) => ({ ...prev, [code]: val < 0 ? 0 : val }));
   };
 
-  const fmt = (n: number) => 'R ' + Math.round(n).toLocaleString('en-ZA');
+  const initials = (e: any) => {
+    const f = (e.firstName || '')[0] || '';
+    const l = (e.lastName || '')[0] || '';
+    return (f + l).toUpperCase();
+  };
+
+  const empSite = (e: any) => {
+    const s = sites.find((s: any) => s.id === e.siteId);
+    return s?.name || '—';
+  };
+
+  const empTotalCollected = (e: any) => {
+    const empLogs = logs.filter((l: any) => l.collectorId === e.id);
+    return empLogs.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
+  };
 
   return (
     <div>
+      {/* ── Header ── */}
       <div className="ph">
         <div>
           <div className="pt">Depot Scanner</div>
-          <div className="ps">Scan a collector's W2W QR / employee badge to log an intake delivery</div>
+          <div className="ps">
+            Scan or enter employee ID · capture waste per category · submit delivery note
+          </div>
         </div>
       </div>
 
-      {toast && (
-        <div className="alert alert-green" style={{ marginBottom: 12 }}>
-          <CheckCircle2 size={14} /> <span>{toast}</span>
+      {/* Success alert */}
+      {successMsg && (
+        <div className="alert alert-green" style={{ marginBottom: 14 }}>
+          ✓ {successMsg}
         </div>
       )}
 
-      <div className="stats-grid">
-        <StatCard label="Scans Today" value={String(todayLogs.length)} sub="Intake events" icon="📷" rail="sc-blue" color="var(--color-w2w)" />
-        <StatCard label="Intake Volume" value={todayKg.toFixed(1) + 'kg'} sub="Across categories" icon="⚖" rail="sc-green" color="var(--color-green)" />
-        <StatCard label="Value Captured" value={fmt(todayValue)} sub="Today's totals" icon="💰" rail="sc-purple" color="var(--color-purple)" />
-        <StatCard label="Unique Collectors" value={String(new Set(todayLogs.map((l: any) => l.collectorId).filter(Boolean)).size)} sub="Visiting today" icon="👷" rail="sc-amber" color="var(--color-amber)" />
-      </div>
-
+      {/* ── 2-Column Layout ── */}
       <div className="g2">
+        {/* ═════ LEFT: Employee Lookup ═════ */}
         <div className="card">
-          <div className="ch"><div className="ct">Scanner</div><div className="cs">Aim camera at QR or enter manually</div></div>
+          <div className="ch">
+            <div className="ct">Employee Lookup</div>
+          </div>
           <div className="cb">
-            <div style={{
-              background: 'var(--color-ink)',
-              borderRadius: 14,
-              padding: 24,
-              textAlign: 'center',
-              marginBottom: 14,
-            }}>
-              <div style={{
-                width: 220, height: 220,
-                border: '3px solid var(--color-accent)',
-                borderRadius: 12,
-                margin: '0 auto 14px',
-                position: 'relative',
-                background: 'rgba(0,200,150,0.04)',
-              }}>
-                <ScanLine size={68} style={{
-                  position: 'absolute', top: '50%', left: '50%',
-                  transform: 'translate(-50%, -50%)', color: 'rgba(0,200,150,0.55)',
-                }} />
-              </div>
-              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>
-                Live scanner — connect camera permission to enable
-              </div>
+            {/* Info alert */}
+            <div
+              className="alert alert-blue"
+              style={{ marginBottom: 16, fontSize: 12 }}
+            >
+              ℹ️ Enter the employee's ID number (e.g. W2W-002) or their name. The waste submission
+              will be linked to their performance record.
             </div>
 
-            <div className="fg">
-              <label className="fl">Manual Entry — Employee # or Name</label>
+            {/* Search row */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
               <input
                 className="fc"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
+                list="employee-suggestions"
+                value={scanId}
+                onChange={(e) => setScanId(e.target.value.toUpperCase())}
                 onKeyDown={(e) => e.key === 'Enter' && lookup()}
-                placeholder="e.g. W2W-0004 or Lindiwe Zulu"
-                style={{ fontFamily: 'var(--font-mono)' }}
+                placeholder="Search by Employee ID or Name..."
+                style={{
+                  flex: 1,
+                  fontFamily: 'var(--font-mono)',
+                  textTransform: 'uppercase',
+                }}
               />
+              <datalist id="employee-suggestions">
+                {employees.map((e: any) => (
+                  <option key={e.id} value={e.empNo}>
+                    {e.firstName} {e.lastName} ({e.department || 'No Dept'})
+                  </option>
+                ))}
+              </datalist>
+              <button
+                className="btn btn-primary"
+                onClick={lookup}
+                disabled={!scanId.trim()}
+              >
+                🔍 Look Up
+              </button>
             </div>
-            <button
-              className="btn btn-primary"
-              style={{ width: '100%', justifyContent: 'center' }}
-              onClick={lookup}
-              disabled={!code.trim()}
-            >
-              Look up collector →
-            </button>
 
-            {matched && (
-              <div style={{
-                marginTop: 14,
-                padding: 12,
-                background: 'var(--color-w2w-pale)',
-                border: '1px solid var(--color-w2w-light)',
-                borderRadius: 8,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <CheckCircle2 size={16} style={{ color: 'var(--color-green)' }} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700 }}>{matched.firstName} {matched.lastName}</div>
-                    <div style={{ fontSize: 11, color: 'var(--color-text3)', fontFamily: 'var(--font-mono)' }}>{matched.empNo}</div>
+            {/* Not found */}
+            {notFound && (
+              <div className="alert alert-red" style={{ marginBottom: 14 }}>
+                Employee not found: <b>{notFound}</b>. Check the ID and try again.
+              </div>
+            )}
+
+            {/* ── Employee found ── */}
+            {foundEmployee && (
+              <>
+                {/* Green verification banner */}
+                <div
+                  style={{
+                    background: 'rgba(76, 175, 80, 0.08)',
+                    border: '1px solid rgba(76, 175, 80, 0.25)',
+                    borderRadius: 10,
+                    padding: 14,
+                    marginBottom: 16,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                    }}
+                  >
+                    {/* Avatar */}
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: '50%',
+                        background: '#4CAF50',
+                        color: '#fff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 800,
+                        fontSize: 15,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {initials(foundEmployee)}
+                    </div>
+
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>
+                        {foundEmployee.firstName} {foundEmployee.lastName}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--color-text3)',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: 6,
+                        }}
+                      >
+                        <span>{foundEmployee.role || foundEmployee.department || 'Collector'}</span>
+                        <span>·</span>
+                        <span
+                          style={{ fontFamily: 'var(--font-mono)' }}
+                        >
+                          {foundEmployee.empNo}
+                        </span>
+                        <span>·</span>
+                        <span>{empSite(foundEmployee)}</span>
+                        <span>·</span>
+                        <span>
+                          Total: {empTotalCollected(foundEmployee).toFixed(1)} kg
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Verified badge */}
+                    <span
+                      style={{
+                        background: '#4CAF50',
+                        color: '#fff',
+                        padding: '3px 10px',
+                        borderRadius: 20,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Verified ✓
+                    </span>
                   </div>
-                  <button className="mc" onClick={() => setMatched(null)}><X size={14} /></button>
                 </div>
-                <div className="fgrid">
-                  <div className="fg"><label className="fl">Site</label>
-                    <select className="fc" value={siteId} onChange={(e) => setSiteId(e.target.value)}>
-                      <option value="">— Select —</option>
-                      {sites.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="fg"><label className="fl">Waste Type</label>
-                    <select className="fc" value={typeId} onChange={(e) => onTypeChange(e.target.value)}>
-                      <option value="">— Select —</option>
-                      {wasteTypes.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="fg"><label className="fl">Qty (kg)</label>
-                    <input className="fc" type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="0" /></div>
-                  <div className="fg"><label className="fl">Price/kg (R)</label>
-                    <input className="fc" type="number" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} /></div>
+
+                {/* Depot dropdown */}
+                <div className="fg" style={{ marginBottom: 14 }}>
+                  <label className="fl">Depot / Collection Point</label>
+                  <select
+                    className="fc"
+                    value={depotId}
+                    onChange={(e) => setDepotId(e.target.value)}
+                  >
+                    <option value="">— Select depot —</option>
+                    {depots.map((s: any) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                {qty && price && (
-                  <div style={{ fontSize: 11, marginBottom: 8 }}>
-                    Estimated value: <b style={{ color: 'var(--color-green)' }}>{fmt(parseFloat(qty) * parseFloat(price))}</b>
-                  </div>
-                )}
+
+                {/* Waste categories header */}
+                <div
+                  style={{
+                    fontWeight: 700,
+                    fontSize: 13,
+                    marginBottom: 10,
+                    borderBottom: '1px solid var(--color-border)',
+                    paddingBottom: 6,
+                  }}
+                >
+                  Waste by Category (kg)
+                </div>
+
+                {/* 3-column grid of waste inputs */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: 10,
+                    marginBottom: 14,
+                  }}
+                >
+                  {wasteTypes.map((cat: any) => (
+                    <div key={cat.id}>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          marginBottom: 4,
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            background: cat.colour || '#146484',
+                            display: 'inline-block',
+                            flexShrink: 0,
+                          }}
+                        />
+                        {cat.name} <span style={{color: 'var(--color-text3)', fontSize: 9}}>({cat.unit})</span>
+                      </label>
+                      <input
+                        className="fc"
+                        type="number"
+                        min={0}
+                        value={wasteInputs[cat.id] || ''}
+                        onChange={(e) =>
+                          setWaste(cat.id, parseFloat(e.target.value) || 0)
+                        }
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Total weight bar */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 14px',
+                    background: 'var(--color-surface3)',
+                    borderRadius: 8,
+                    marginBottom: 14,
+                    fontWeight: 700,
+                    fontSize: 13,
+                  }}
+                >
+                  <span>Total Weight:</span>
+                  <span>
+                    {totalKg.toFixed(1)} kg{' '}
+                    <span
+                      style={{
+                        fontWeight: 400,
+                        fontSize: 11,
+                        color: 'var(--color-text3)',
+                      }}
+                    >
+                      · R {totalValue.toFixed(2)}
+                    </span>
+                  </span>
+                </div>
+
+                {/* Notes */}
+                <div className="fg" style={{ marginBottom: 14 }}>
+                  <label className="fl">Notes (optional)</label>
+                  <input
+                    className="fc"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Additional notes…"
+                  />
+                </div>
+
+                {/* Submit */}
                 <button
                   className="btn btn-accent"
                   style={{ width: '100%', justifyContent: 'center' }}
                   onClick={submit}
-                  disabled={!typeId || !qty || createMut.isPending}
+                  disabled={totalKg <= 0 || isSubmitting}
                 >
-                  {createMut.isPending ? 'Logging…' : 'Log Intake →'}
+                  {isSubmitting
+                    ? 'Submitting…'
+                    : '✓ Submit Collection & Generate Delivery Note'}
                 </button>
-              </div>
+              </>
             )}
           </div>
         </div>
 
+        {/* ═════ RIGHT: Today's Submissions ═════ */}
         <div className="card">
-          <div className="ch"><div className="ct">Today's Scans</div><div className="cs">Latest first</div></div>
-          <div className="cb" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="ch">
+            <div className="ct">Today's Submissions</div>
+            <div className="cs">Last 10 depot-scanned entries</div>
+          </div>
+          <div className="cb">
             {todayLogs.length === 0 ? (
-              <div style={{ textAlign: 'center', color: 'var(--color-text3)', padding: 24, fontSize: 12 }}>
-                No intakes recorded today.
+              <div
+                style={{
+                  textAlign: 'center',
+                  color: 'var(--color-text3)',
+                  padding: 32,
+                  fontSize: 12,
+                }}
+              >
+                No submissions today
               </div>
             ) : (
-              todayLogs.slice(0, 10).map((l: any) => {
-                const collName = l.collector ? `${l.collector.firstName} ${l.collector.lastName}` : 'Unknown';
-                const time = new Date(l.createdAt || l.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                return (
-                  <div key={l.id} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: 10,
-                    background: 'var(--color-surface2)', borderRadius: 8,
-                  }}>
-                    <div style={{
-                      width: 40, height: 40, borderRadius: 8,
-                      background: 'var(--color-w2w-pale)', color: 'var(--color-w2w)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 11,
-                    }}>{time}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600 }}>{collName} <span style={{ color: 'var(--color-text3)', fontWeight: 400, fontFamily: 'var(--font-mono)', fontSize: 11 }}>{l.collector?.empNo || ''}</span></div>
-                      <div style={{ fontSize: 11, color: 'var(--color-text2)' }}>{l.wasteType?.name || '—'} · {l.quantity} kg</div>
-                    </div>
-                    <div style={{ fontWeight: 700, color: 'var(--color-green)', fontSize: 13 }}>{fmt(Number(l.totalValue) || 0)}</div>
-                  </div>
-                );
-              })
+              <div className="tw">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Total (t)</th>
+                      <th>Time</th>
+                      <th>Depot</th>
+                      <th>DN Ref</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {todayLogs.slice(0, 10).map((l: any) => {
+                      const collName = l.collector
+                        ? `${l.collector.firstName} ${l.collector.lastName}`
+                        : 'Unknown';
+                      const time = new Date(
+                        l.createdAt || l.date,
+                      ).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      });
+                      const depotName =
+                        l.site?.name ||
+                        sites.find((s: any) => s.id === l.siteId)?.name ||
+                        '—';
+                      const tons = ((Number(l.totalQuantity) || 0) / 1000).toFixed(3);
+                      return (
+                        <tr key={l.dnRef}>
+                          <td>
+                            <div style={{ fontWeight: 600, fontSize: 12 }}>
+                              {collName}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 10,
+                                color: 'var(--color-text3)',
+                                fontFamily: 'var(--font-mono)',
+                              }}
+                            >
+                              {l.collector?.empNo || ''}
+                            </div>
+                          </td>
+                          <td style={{ fontWeight: 700 }}>{tons}</td>
+                          <td>{time}</td>
+                          <td style={{ fontSize: 11 }}>{depotName}</td>
+                          <td>
+                            <span
+                              className="badge bb"
+                              style={{ fontSize: 10 }}
+                            >
+                              {l.dnRef}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>

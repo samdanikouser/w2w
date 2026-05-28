@@ -5,10 +5,12 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: Role;
+  role?: Role;
   siteId?: string;
   siteName?: string;
   avatar?: string;
+  modules?: string[];
+  roleName?: string;
 }
 
 // ── Sites ──

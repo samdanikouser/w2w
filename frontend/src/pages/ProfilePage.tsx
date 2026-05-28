@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { authApi } from '../api/endpoints';
 import { Save, User, Bell, Shield, CheckCircle2 } from 'lucide-react';
+import PasswordInput from '../components/ui/PasswordInput';
 
 const TABS = [
   { id: 'info', label: 'My Info', icon: <User size={13} /> },
@@ -9,12 +10,6 @@ const TABS = [
   { id: 'security', label: 'Security', icon: <Shield size={13} /> },
 ];
 
-const ROLE_FULL: Record<string, string> = {
-  super_admin: 'IT Administrator',
-  site_admin: 'Site Supervisor',
-  data_clerk: 'Administrator',
-  field_worker: 'Field Worker',
-};
 
 function avatarColor(id: string): string {
   const palette = ['#146484', '#00c896', '#d97706', '#6d28d9', '#c0392b', '#1a9ec4', '#10b981', '#9b7fe8'];
@@ -54,7 +49,7 @@ export default function ProfilePage() {
 
   if (!user) return null;
 
-  const roleLabel = ROLE_FULL[user.role] || user.role;
+  const roleLabel = user.roleName || user.role.replace(/_/g, ' ');
   const avatarBg = avatarColor(user.id);
 
   return (
@@ -224,13 +219,13 @@ function SecurityTab({ onToast }: { onToast: (t: { message: string; tone: 'green
       </div>
       <div className="fgrid mt14">
         <div className="fg"><label className="fl">Current Password</label>
-          <input className="fc" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
+          <PasswordInput value={current} onChange={setCurrent} autoComplete="current-password" />
         </div>
         <div className="fg"><label className="fl">New Password</label>
-          <input className="fc" type="password" value={next} onChange={(e) => setNext(e.target.value)} placeholder="Min 10 · upper, lower, digit" autoComplete="new-password" />
+          <PasswordInput value={next} onChange={setNext} placeholder="Min 10 · upper, lower, digit" autoComplete="new-password" />
         </div>
         <div className="fg"><label className="fl">Confirm New Password</label>
-          <input className="fc" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+          <PasswordInput value={confirm} onChange={setConfirm} autoComplete="new-password" />
         </div>
       </div>
       <button className="btn btn-primary mt14" onClick={submit} disabled={loading}>

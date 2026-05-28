@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
@@ -9,7 +9,8 @@ router.use(authenticate);
 const roleSchema = z.object({
   name: z.string().min(2).max(60),
   description: z.string().default(''),
-  systemRole: z.enum(['SUPER_ADMIN', 'SITE_ADMIN', 'DATA_CLERK', 'FIELD_WORKER']),
+  
+  modules: z.array(z.string()).default([]),
   isActive: z.boolean().default(true),
 });
 
@@ -27,10 +28,10 @@ router.get('/', async (_req, res, next) => {
 });
 
 // ── POST /api/roles ──
-router.post('/', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('w2w-settings'), async (req: AuthRequest, res, next) => {
   try {
     const d = roleSchema.parse(req.body);
-    const r = await prisma.customRole.create({ data: { ...d, systemRole: d.systemRole as any } });
+    const r = await prisma.customRole.create({ data: { ...d, } });
     await prisma.auditLog.create({
       data: { userId: req.userId, action: 'CREATE', entity: 'CustomRole', entityId: r.id, detail: `Created role ${r.name}` },
     });
@@ -41,12 +42,12 @@ router.post('/', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) =
 });
 
 // ── PUT /api/roles/:id ──
-router.put('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('w2w-settings'), async (req: AuthRequest, res, next) => {
   try {
     const d = roleSchema.partial().parse(req.body);
     const r = await prisma.customRole.update({
       where: { id: req.params.id as string },
-      data: { ...d, systemRole: d.systemRole as any },
+      data: { ...d, },
     });
     await prisma.auditLog.create({
       data: { userId: req.userId, action: 'UPDATE', entity: 'CustomRole', entityId: r.id, detail: `Updated role ${r.name}` },
@@ -58,7 +59,7 @@ router.put('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next)
 });
 
 // ── DELETE /api/roles/:id ──
-router.delete('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('w2w-settings'), async (req: AuthRequest, res, next) => {
   try {
     // Refuse delete if users still reference this role
     const inUse = await prisma.user.count({ where: { customRoleId: req.params.id as string } });

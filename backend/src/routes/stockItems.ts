@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
@@ -34,7 +34,7 @@ router.get('/', async (_req, res, next) => {
   }
 });
 
-router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('stock-register'), async (req: AuthRequest, res, next) => {
   try {
     const d = itemSchema.parse(req.body);
     const status = deriveStatus(d.onHand, d.reorderAt);
@@ -50,7 +50,7 @@ router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest
   }
 });
 
-router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('stock-register'), async (req: AuthRequest, res, next) => {
   try {
     const d = itemSchema.partial().parse(req.body);
     const existing = await prisma.stockItem.findUnique({ where: { id: req.params.id as string } });
@@ -67,7 +67,7 @@ router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthReque
   }
 });
 
-router.delete('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('stock-register'), async (req: AuthRequest, res, next) => {
   try {
     await prisma.stockItem.delete({ where: { id: req.params.id as string } });
     res.json({ message: 'Item deleted' });

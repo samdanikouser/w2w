@@ -3,12 +3,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sitesApi, employeesApi, wasteLogsApi, type SitePayload } from '../api/endpoints';
 import { MapPin, Building2, Plus, Download, Search, X, Edit2, Trash2, Eye } from 'lucide-react';
 import { exportCsv } from '../utils/csv';
+import { loadGeography } from '../utils/geography';
+import { loadDepotTypes } from './W2WSettingsPage';
 
-const TYPE_LABELS: Record<string, string> = {
+const BASE_TYPE_LABELS: Record<string, string> = {
   COOPERATIVE: 'Cooperative',
   DEPOT: 'Depot',
   BUYBACK_CENTRE: 'Buyback Centre',
 };
+
+function getTypeLabels(): Record<string, string> {
+  const labels = { ...BASE_TYPE_LABELS };
+  loadDepotTypes().forEach((dt) => { labels[dt.code] = dt.name; });
+  return labels;
+}
 
 const STATUS_STYLES: Record<string, string> = {
   ACTIVE: 'badge bg',
@@ -16,7 +24,10 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 const EMPTY: SitePayload = {
-  name: '', type: 'COOPERATIVE', region: '', address: '', lat: null, lng: null, status: 'ACTIVE',
+  name: '', type: 'IWMC', region: '', address: '', lat: null, lng: null, status: 'ACTIVE',
+  ward: '', gps: '', supervisor: '', beneficiaries: 30, ohsRating: 80, monthlyTonnage: 0,
+  phase: 'Month 1', focus: '', cleanliness: 'Good', launched: '', notes: '',
+  provinceId: '', municipalityId: '', subRegionId: '',
 };
 
 export default function SitesPage() {
@@ -38,14 +49,17 @@ export default function SitesPage() {
   const createMut = useMutation({
     mutationFn: (p: SitePayload) => sitesApi.create(p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['sites'] }); setModal(null); },
+    onError: (err: any) => { alert('Failed to create site: ' + (err?.response?.data?.message || err?.message || 'Unknown error')); },
   });
   const updateMut = useMutation({
     mutationFn: ({ id, p }: { id: string; p: Partial<SitePayload> }) => sitesApi.update(id, p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['sites'] }); setModal(null); },
+    onError: (err: any) => { alert('Failed to update site: ' + (err?.response?.data?.message || err?.message || 'Unknown error')); },
   });
   const deleteMut = useMutation({
     mutationFn: (id: string) => sitesApi.delete(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sites'] }),
+    onError: (err: any) => { alert('Failed to delete site: ' + (err?.response?.data?.message || err?.message || 'Unknown error')); },
   });
 
   const enriched = useMemo(() => {
@@ -75,16 +89,32 @@ export default function SitesPage() {
   const openAdd = () => { setForm({ ...EMPTY }); setActive(null); setModal('add'); };
   const openEdit = (s: any) => {
     setForm({
-      name: s.name || '', type: s.type || 'COOPERATIVE', region: s.region || '',
+      name: s.name || '', type: s.type || 'IWMC', region: s.region || '',
       address: s.address || '', lat: s.lat ?? null, lng: s.lng ?? null, status: s.status || 'ACTIVE',
+      ward: s.ward || '', gps: s.gps || '', supervisor: s.supervisor || '',
+      beneficiaries: s.beneficiaries ?? 30, ohsRating: s.ohsRating ?? 80,
+      monthlyTonnage: s.monthlyTonnage ?? 0, phase: s.phase || 'Month 1',
+      focus: s.focus || '', cleanliness: s.cleanliness || 'Good',
+      launched: s.launched || '', notes: s.notes || '',
+      provinceId: s.provinceId || '', municipalityId: s.municipalityId || '',
+      subRegionId: s.subRegionId || '',
     });
     setActive(s); setModal('edit');
   };
   const openView = (s: any) => { setActive(s); setModal('view'); };
   const save = () => {
     if (!form.name?.trim()) return;
-    if (modal === 'edit' && active) updateMut.mutate({ id: active.id, p: form });
-    else createMut.mutate(form);
+    // Coerce numeric fields
+    const payload: SitePayload = {
+      ...form,
+      beneficiaries: Number(form.beneficiaries) || 0,
+      ohsRating: Number(form.ohsRating) || 80,
+      monthlyTonnage: Number(form.monthlyTonnage) || 0,
+      lat: form.lat ? Number(form.lat) : null,
+      lng: form.lng ? Number(form.lng) : null,
+    };
+    if (modal === 'edit' && active) updateMut.mutate({ id: active.id, p: payload });
+    else createMut.mutate(payload);
   };
   const remove = (s: any) => {
     if (confirm(`Delete site "${s.name}"?`)) deleteMut.mutate(s.id);
@@ -92,7 +122,7 @@ export default function SitesPage() {
   const onExport = () => {
     exportCsv('sites', filtered, [
       { key: 'name', label: 'Name' },
-      { key: 'type', label: 'Type', map: (r: any) => TYPE_LABELS[r.type] || r.type },
+      { key: 'type', label: 'Type', map: (r: any) => getTypeLabels()[r.type] || r.type },
       { key: 'region', label: 'Region' },
       { key: 'address', label: 'Address' },
       { key: 'empCount', label: 'Employees' },
@@ -103,12 +133,48 @@ export default function SitesPage() {
     ]);
   };
 
+  // ── Aggregated stats matching reference ──
+  const totalBens = sites.reduce((s, si: any) => s + (si.beneficiaries || 0), 0);
+  const totalTons = sites.reduce((s, si: any) => s + (si.monthlyTonnage || 0), 0);
+  const avgOHS = sites.length > 0 ? Math.round(sites.reduce((s, si: any) => s + (si.ohsRating || 0), 0) / sites.length) : 0;
+  const ohsAlertSites = sites.filter((s: any) => (s.ohsRating || 80) < 70);
+
+  // ── Group sites by sub-region / region for hierarchy view ──
+  const regionGroups = useMemo(() => {
+    const geo = loadGeography();
+    const srMap = new Map<string, any>();
+    (geo.subRegions || []).forEach((sr: any) => srMap.set(sr.id, sr));
+
+    const map = new Map<string, { sites: any[]; description: string }>();
+    filtered.forEach((s) => {
+      // Resolve region name: first try subRegionId → geography name, then fall back to region field
+      let regionName = s.region || '';
+      let description = '';
+      if (s.subRegionId && srMap.has(s.subRegionId)) {
+        const sr = srMap.get(s.subRegionId)!;
+        regionName = sr.name || regionName;
+        description = sr.description || '';
+      }
+      if (!regionName) regionName = 'Unassigned';
+
+      if (!map.has(regionName)) map.set(regionName, { sites: [], description });
+      map.get(regionName)!.sites.push(s);
+    });
+    return Array.from(map.entries())
+      .map(([name, data]) => ({ name, sites: data.sites, description: data.description }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [filtered]);
+
+  const [siteTab, setSiteTab] = useState<'sites' | 'coops'>('sites');
+
   return (
     <div>
       <div className="ph">
         <div>
-          <div className="pt">Sites & Regions</div>
-          <div className="ps">{sites.length} location{sites.length === 1 ? '' : 's'} across the programme</div>
+          <div className="pt">Sites, Regions & Cooperatives</div>
+          <div className="ps" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <MapPin size={11} /> Gauteng · CoJ Metro · {regionGroups.length} Planning Regions · {sites.length} Sites · {W2W_COOPERATIVES.length} Cooperatives
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-accent" onClick={openAdd}><Plus size={13} /> Add Site</button>
@@ -116,82 +182,174 @@ export default function SitesPage() {
         </div>
       </div>
 
-      <div className="stats-grid">
-        <StatCard label="Total Sites" value={String(stats.total)} sub="All types combined" icon="📍" rail="sc-blue" color="var(--color-w2w)" />
-        <StatCard label="Active Sites" value={String(stats.active)} sub={`${stats.total - stats.active} inactive`} icon="✅" rail="sc-green" color="var(--color-green)" />
-        <StatCard label="Cooperatives" value={String(stats.coops)} sub="Collection sites" icon="🤝" rail="sc-purple" color="var(--color-purple)" />
-        <StatCard label="Depots" value={String(stats.depots)} sub="Buyback locations" icon="🏢" rail="sc-amber" color="var(--color-amber)" />
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '2px solid var(--color-border)' }}>
+        <button
+          onClick={() => setSiteTab('sites')}
+          style={{
+            padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            background: 'transparent', border: 'none', borderBottom: siteTab === 'sites' ? '3px solid var(--color-w2w)' : '3px solid transparent',
+            color: siteTab === 'sites' ? 'var(--color-w2w)' : 'var(--color-text3)', transition: 'all 0.2s',
+          }}
+        >🏗 Sites & Regions</button>
+        <button
+          onClick={() => setSiteTab('coops')}
+          style={{
+            padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            background: 'transparent', border: 'none', borderBottom: siteTab === 'coops' ? '3px solid var(--color-w2w)' : '3px solid transparent',
+            color: siteTab === 'coops' ? 'var(--color-w2w)' : 'var(--color-text3)', transition: 'all 0.2s',
+          }}
+        >🤝 Cooperatives ({W2W_COOPERATIVES.length})</button>
       </div>
 
-      <div className="card">
-        <div className="ch">
-          <div className="ct">Sites Directory</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <FilterInput value={search} onChange={setSearch} placeholder="Search site, region…" />
-            <select className="fc" style={{ width: 160 }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-              <option value="all">All types</option>
-              {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
+      {siteTab === 'coops' ? (
+        <CooperativesSection sites={sites} employees={employees} logs={logs} />
+      ) : (
+        <>
+          {/* OHS Alert */}
+          {ohsAlertSites.length > 0 && (
+            <div className="alert alert-red" style={{ marginBottom: 16 }}>
+              <b>OHS Alert:</b> {ohsAlertSites.map((s: any) => <span key={s.id}><b>{s.name}</b> ({s.ohsRating}%) </span>)} require corrective action.
+            </div>
+          )}
+
+          {/* Stats */}
+          <div className="g4 mb20">
+            <StatCard label="Active Sites" value={String(stats.active)} sub={`of ${stats.total} total`} icon="🏗" rail="sc-blue" />
+            <StatCard label="Total Beneficiaries" value={String(totalBens)} sub="across all sites" icon="👷" rail="sc-green" />
+            <StatCard label="Monthly Tonnage" value={totalTons + 't'} sub="" icon="⚖" rail="sc-amber" />
+            <StatCard label="Avg OHS Rating" value={avgOHS + '%'} sub="" icon="🛡" rail="sc-purple" />
           </div>
-        </div>
-        <div className="tw">
-          <table>
-            <thead>
-              <tr>
-                <th>Site</th>
-                <th>Type</th>
-                <th>Region</th>
-                <th>Employees</th>
-                <th>Deliveries</th>
-                <th>Recovered</th>
-                <th>Revenue</th>
-                <th>Status</th>
-                <th style={{ width: 100 }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>
-                  {sites.length === 0 ? 'No sites yet. Click "Add Site" to create your first.' : 'No sites match your filter.'}
-                </td></tr>
-              ) : (
-                filtered.map((s: any) => (
-                  <tr key={s.id}>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        {s.type === 'DEPOT' ? <Building2 size={14} style={{ color: 'var(--color-amber)' }} /> : <MapPin size={14} style={{ color: 'var(--color-w2w)' }} />}
+
+          {/* Province & Municipality — dynamic from Geography settings */}
+          {(() => {
+            const geo = loadGeography();
+            const province = geo.provinces?.[0];
+            const municipality = geo.municipalities?.[0];
+            return (
+              <>
+                {/* Province Header */}
+                {province && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                    <div style={{ background: 'var(--color-ink)', color: 'var(--color-accent)', padding: '6px 14px', borderRadius: 8, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>🇿🇦 Province</div>
+                    <div style={{ fontSize: 16, fontWeight: 800 }}>{province.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-text3)' }}>Code: {province.code}{province.premier ? ` · Premier: ${province.premier}` : ''}</div>
+                  </div>
+                )}
+
+                {/* Municipality */}
+                {municipality && (
+                  <div style={{ border: '1px solid var(--color-border)', borderRadius: 12, marginBottom: 16, overflow: 'hidden' }}>
+                    <div style={{ background: 'var(--color-w2w-light)', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ background: 'var(--color-w2w)', color: 'white', padding: '3px 10px', borderRadius: 6, fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>{municipality.type || 'Municipality'}</div>
                         <div>
-                          <div style={{ fontWeight: 600 }}>{s.name}</div>
-                          <div style={{ fontSize: 10, color: 'var(--color-text3)' }}>{s.address || '—'}</div>
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>{municipality.name}</div>
+                          <div style={{ fontSize: 10, color: 'var(--color-text3)' }}>Code: {municipality.code} · {sites.length} sites · {regionGroups.length} planning regions</div>
                         </div>
                       </div>
-                    </td>
-                    <td><span className="badge bb">{TYPE_LABELS[s.type] || s.type}</span></td>
-                    <td>{s.region || '—'}</td>
-                    <td style={{ fontWeight: 600 }}>{s.empCount}</td>
-                    <td>{s.deliveries}</td>
-                    <td>{(s.totalKg / 1000).toFixed(2)} t</td>
-                    <td style={{ fontWeight: 600, color: 'var(--color-green)' }}>R {Math.round(s.totalRev).toLocaleString()}</td>
-                    <td><span className={STATUS_STYLES[s.status] || 'badge bk'}>{s.status}</span></td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <RowBtn title="View" onClick={() => openView(s)}><Eye size={13} /></RowBtn>
-                        <RowBtn title="Edit" onClick={() => openEdit(s)}><Edit2 size={13} /></RowBtn>
-                        <RowBtn title="Delete" danger onClick={() => remove(s)}><Trash2 size={13} /></RowBtn>
+                      <span className="badge bg">Active</span>
+                    </div>
+
+            {/* Sub-Regions with Sites LIST */}
+            <div style={{ padding: 14 }}>
+              {regionGroups.map((group) => {
+                const regionName = group.name;
+                const regionSites = group.sites;
+                const srCoops = W2W_COOPERATIVES.filter((co) => regionSites.find((s: any) => s.id === co.siteId || co.region === regionName));
+                const srBens = regionSites.reduce((sum: number, s: any) => sum + (s.beneficiaries || 0), 0);
+                const srTons = regionSites.reduce((sum: number, s: any) => sum + (s.monthlyTonnage || 0), 0);
+
+                return (
+                  <div key={regionName} style={{ marginBottom: 18 }}>
+                    {/* Sub-Region Header */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, padding: '8px 12px', background: 'var(--color-surface3)', borderRadius: 8, borderLeft: '3px solid var(--color-accent)' }}>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-w2w)' }}>📍 {regionName}</div>
+                        {group.description && <div style={{ fontSize: 10, color: 'var(--color-text3)', marginTop: 2 }}>{group.description}</div>}
                       </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                      <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                        <span className="badge bb" style={{ fontSize: 9 }}>{regionSites.length} site{regionSites.length !== 1 ? 's' : ''}</span>
+                        <span className="badge bc" style={{ fontSize: 9 }}>{srCoops.length} coop{srCoops.length !== 1 ? 's' : ''}</span>
+                        <span className="badge bg" style={{ fontSize: 9 }}>{srBens} beneficiaries</span>
+                        <span className="badge ba" style={{ fontSize: 9 }}>{srTons}t/mo</span>
+                      </div>
+                    </div>
+
+                    {/* Sites Table */}
+                    <div className="tw" style={{ paddingLeft: 12 }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Site</th>
+                            <th>Type</th>
+                            <th>Ward</th>
+                            <th>Tonnage</th>
+                            <th>Beneficiaries</th>
+                            <th>OHS</th>
+                            <th>Supervisor</th>
+                            <th>Staff</th>
+                            <th>Status</th>
+                            <th style={{ width: 80 }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {regionSites.map((s: any) => {
+                            const ohsRating = s.ohsRating || 80;
+                            const ohsColor = ohsRating >= 80 ? 'var(--color-green)' : ohsRating >= 65 ? 'var(--color-amber)' : 'var(--color-red)';
+                            return (
+                              <tr key={s.id}>
+                                <td>
+                                  <div>
+                                    <div style={{ fontWeight: 700, fontSize: 12 }}>{s.name}</div>
+                                    <div style={{ fontSize: 9, color: 'var(--color-text3)', fontFamily: 'var(--mono, monospace)' }}>{s.id?.slice(0, 8)}</div>
+                                  </div>
+                                </td>
+                                <td><span className="badge bb" style={{ fontSize: 10 }}>{getTypeLabels()[s.type] || s.type}</span></td>
+                                <td style={{ fontSize: 11 }}>{s.ward || '—'}</td>
+                                <td style={{ fontWeight: 700, fontSize: 12 }}>{s.monthlyTonnage || 0}t</td>
+                                <td style={{ fontWeight: 700, fontSize: 12 }}>{s.beneficiaries || 0}</td>
+                                <td style={{ minWidth: 80 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <div style={{ flex: 1, background: 'var(--color-surface3)', borderRadius: 3, height: 4 }}>
+                                      <div style={{ width: ohsRating + '%', background: ohsColor, borderRadius: 3, height: 4 }} />
+                                    </div>
+                                    <span style={{ fontSize: 10, fontWeight: 700, color: ohsColor, minWidth: 28 }}>{ohsRating}%</span>
+                                  </div>
+                                </td>
+                                <td style={{ fontSize: 11 }}>
+                                  {s.supervisor ? <span style={{ fontWeight: 600 }}>{s.supervisor}</span> : <span style={{ color: 'var(--color-red)', fontSize: 10 }}>Unassigned</span>}
+                                </td>
+                                <td style={{ fontWeight: 600, textAlign: 'center' }}>{s.empCount}</td>
+                                <td><span className={`badge ${s.status === 'ACTIVE' ? 'bg' : 'ba'}`} style={{ fontSize: 9 }}>{s.status === 'ACTIVE' ? 'Active' : s.status}</span></td>
+                                <td>
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    <RowBtn title="Edit" onClick={() => openEdit(s)}><Edit2 size={13} /></RowBtn>
+                                    <RowBtn title="Delete" danger onClick={() => remove(s)}><Trash2 size={13} /></RowBtn>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+                )}
+              </>
+            );
+          })()}
+        </>
+      )}
 
       {/* ── Add/Edit Modal ── */}
       {(modal === 'add' || modal === 'edit') && (
         <div className="modal-ov open" onClick={() => setModal(null)}>
-          <div className="modal" style={{ width: 600 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ width: 720 }} onClick={(e) => e.stopPropagation()}>
             <div className="mh">
               <span className="mt">{modal === 'edit' ? 'Edit Site' : 'Add Site'}</span>
               <button onClick={() => setModal(null)} className="mc"><X size={15} /></button>
@@ -200,13 +358,60 @@ export default function SitesPage() {
               <div className="fgrid">
                 <div className="full">
                   <div className="fg"><label className="fl">Site Name <span className="req">*</span></label>
-                    <input className="fc" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Diepkloof Buyback Depot" />
+                    <input className="fc" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Diepsloot Dumping Site" />
                   </div>
+                </div>
+                <div className="fg"><label className="fl">Province</label>
+                  <select className="fc" value={form.provinceId || ''} onChange={(e) => setForm({ ...form, provinceId: e.target.value })}>
+                    <option value="">Select province</option>
+                    {loadGeography().provinces.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div className="fg"><label className="fl">Municipality</label>
+                  <select className="fc" value={form.municipalityId || ''} onChange={(e) => setForm({ ...form, municipalityId: e.target.value })}>
+                    <option value="">Select municipality</option>
+                    {loadGeography().municipalities.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                </div>
+                <div className="fg"><label className="fl">Sub-Region (Planning Region)</label>
+                  <select className="fc" value={form.subRegionId || ''} onChange={(e) => setForm({ ...form, subRegionId: e.target.value })}>
+                    <option value="">Select sub-region</option>
+                    {loadGeography().subRegions.map((sr: any) => <option key={sr.id} value={sr.id}>{sr.name}</option>)}
+                  </select>
                 </div>
                 <div className="fg"><label className="fl">Type</label>
                   <select className="fc" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                    {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                    {Object.entries(getTypeLabels()).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
+                </div>
+                <div className="fg"><label className="fl">Ward</label>
+                  <input className="fc" value={form.ward || ''} onChange={(e) => setForm({ ...form, ward: e.target.value })} placeholder="Ward number" />
+                </div>
+                <div className="fg"><label className="fl">GPS Coordinates</label>
+                  <input className="fc" value={form.gps || ''} onChange={(e) => setForm({ ...form, gps: e.target.value })} placeholder="-26.1234,28.0456" />
+                  <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 4, fontSize: 11 }} onClick={() => {
+                    navigator.geolocation?.getCurrentPosition((p) => {
+                      setForm((prev) => ({ ...prev, gps: p.coords.latitude.toFixed(6) + ',' + p.coords.longitude.toFixed(6) }));
+                    });
+                  }}>📍 Get GPS</button>
+                </div>
+                <div className="fg"><label className="fl">Address</label>
+                  <input className="fc" value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Street, suburb" />
+                </div>
+                <div className="fg"><label className="fl">Supervisor</label>
+                  <input className="fc" value={form.supervisor || ''} onChange={(e) => setForm({ ...form, supervisor: e.target.value })} placeholder="Supervisor name or ID" />
+                </div>
+                <div className="fg"><label className="fl">Target Beneficiaries</label>
+                  <input className="fc" type="number" value={form.beneficiaries ?? 30} onChange={(e) => setForm({ ...form, beneficiaries: parseInt(e.target.value) || 0 })} />
+                </div>
+                <div className="fg"><label className="fl">OHS Rating (%)</label>
+                  <input className="fc" type="number" min={0} max={100} value={form.ohsRating ?? 80} onChange={(e) => setForm({ ...form, ohsRating: parseInt(e.target.value) || 0 })} />
+                </div>
+                <div className="fg"><label className="fl">Monthly Tonnage (t)</label>
+                  <input className="fc" type="number" step="0.1" value={form.monthlyTonnage ?? 0} onChange={(e) => setForm({ ...form, monthlyTonnage: parseFloat(e.target.value) || 0 })} />
+                </div>
+                <div className="fg"><label className="fl">Launch Date</label>
+                  <input className="fc" type="date" value={form.launched || ''} onChange={(e) => setForm({ ...form, launched: e.target.value })} />
                 </div>
                 <div className="fg"><label className="fl">Status</label>
                   <select className="fc" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
@@ -214,17 +419,21 @@ export default function SitesPage() {
                     <option value="INACTIVE">Inactive</option>
                   </select>
                 </div>
-                <div className="fg"><label className="fl">Region</label>
-                  <input className="fc" value={form.region || ''} onChange={(e) => setForm({ ...form, region: e.target.value })} placeholder="e.g. Region D — Soweto" />
-                </div>
-                <div className="fg"><label className="fl">Address</label>
-                  <input className="fc" value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Street, suburb" />
-                </div>
                 <div className="fg"><label className="fl">Latitude</label>
                   <input className="fc" type="number" step="0.000001" value={form.lat ?? ''} onChange={(e) => setForm({ ...form, lat: e.target.value ? parseFloat(e.target.value) : null })} placeholder="-26.123456" />
                 </div>
                 <div className="fg"><label className="fl">Longitude</label>
                   <input className="fc" type="number" step="0.000001" value={form.lng ?? ''} onChange={(e) => setForm({ ...form, lng: e.target.value ? parseFloat(e.target.value) : null })} placeholder="27.123456" />
+                </div>
+                <div className="full">
+                  <div className="fg"><label className="fl">Focus / Description</label>
+                    <input className="fc" value={form.focus || ''} onChange={(e) => setForm({ ...form, focus: e.target.value })} placeholder="e.g. High-volume plastics recovery" />
+                  </div>
+                </div>
+                <div className="full">
+                  <div className="fg"><label className="fl">Notes</label>
+                    <textarea className="fc" rows={3} value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -241,19 +450,33 @@ export default function SitesPage() {
       {/* ── View Modal ── */}
       {modal === 'view' && active && (
         <div className="modal-ov open" onClick={() => setModal(null)}>
-          <div className="modal" style={{ width: 520 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ width: 720 }} onClick={(e) => e.stopPropagation()}>
             <div className="mh">
               <span className="mt">{active.name}</span>
               <button onClick={() => setModal(null)} className="mc"><X size={15} /></button>
             </div>
             <div className="mb">
               {[
-                ['Type', TYPE_LABELS[active.type] || active.type],
-                ['Region', active.region],
+                ['Type', getTypeLabels()[active.type] || active.type],
+                ['Province', active.provinceId],
+                ['Municipality', active.municipalityId],
+                ['Sub-Region', active.subRegionId],
+                ['Programme Region', active.region],
+                ['Ward', active.ward],
+                ['GPS', active.gps],
                 ['Address', active.address],
                 ['Latitude', active.lat],
                 ['Longitude', active.lng],
+                ['Supervisor', active.supervisor],
+                ['Target Beneficiaries', active.beneficiaries],
+                ['OHS Rating', active.ohsRating ? active.ohsRating + '%' : ''],
+                ['Monthly Tonnage', active.monthlyTonnage ? active.monthlyTonnage + ' t' : ''],
+                ['Phase', active.phase],
+                ['Focus', active.focus],
+                ['Cleanliness', active.cleanliness],
+                ['Launch Date', active.launched],
                 ['Status', active.status],
+                ['Notes', active.notes],
               ].map(([k, v]) => (
                 <div key={k as string} className="drow">
                   <div className="dlb">{k}</div>
@@ -269,6 +492,236 @@ export default function SitesPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+//  Cooperatives Section
+// ═══════════════════════════════════════════════════
+const W2W_COOPERATIVES = [
+  { id: 'COOP-001', name: 'Florida Lake Green Collective', siteId: 'SITE-001', region: 'Region C', focus: 'Plastics & Mixed Recyclables', mentor: 'SCM PMO' },
+  { id: 'COOP-002', name: 'Fleurhof Recyclers Cooperative', siteId: 'SITE-002', region: 'Region C', focus: 'Mixed Recyclables', mentor: 'Polyco' },
+  { id: 'COOP-003', name: 'Doornkop Waste Enterprise', siteId: 'SITE-003', region: 'Region C', focus: 'General Waste Sorting', mentor: 'SCM PMO' },
+  { id: 'COOP-004', name: 'Zandspruit Community Sorters', siteId: 'SITE-004', region: 'Region C', focus: 'Community Recycling', mentor: 'SCM PMO' },
+  { id: 'COOP-005', name: 'Newtown Recycle Cooperative', siteId: 'SITE-005', region: 'Region F', focus: 'Mixed Recyclables — inner city', mentor: 'Fibre Cycle' },
+  { id: 'COOP-006', name: 'Marshalltown Waste Pickers Coop', siteId: 'SITE-006', region: 'Region F', focus: 'Commercial Waste Sorting', mentor: 'Petco' },
+  { id: 'COOP-007', name: 'Naledi Community Collective', siteId: 'SITE-007', region: 'Region D', focus: 'Plastics Recovery', mentor: 'Petco' },
+  { id: 'COOP-008', name: 'Jabulani Rail Recyclers', siteId: 'SITE-008', region: 'Region D', focus: 'Mixed Recyclables — rail corridor', mentor: 'SCM PMO' },
+  { id: 'COOP-009', name: 'Jabulile Youth Recyclers', siteId: 'SITE-009', region: 'Region G', focus: 'Paper & Plastics', mentor: 'Fibre Cycle' },
+  { id: 'COOP-010', name: 'Sepona Park Waste Enterprise', siteId: 'SITE-010', region: 'Region G', focus: 'General Waste & Organics', mentor: 'SCM PMO' },
+  { id: 'COOP-011', name: 'Lenasia Recyclers Cooperative', siteId: 'SITE-011', region: 'Region G', focus: 'Mixed Recyclables — transport node', mentor: 'Polyco' },
+  { id: 'COOP-012', name: 'Zodiac School Community Coop', siteId: 'SITE-012', region: 'Region G', focus: 'Paper & Cardboard', mentor: 'Fibre Cycle' },
+  { id: 'COOP-013', name: 'Alice Street Sorters', siteId: 'SITE-013', region: 'Region G', focus: 'General Waste Sorting', mentor: 'SCM PMO' },
+  { id: 'COOP-014', name: 'Pikitup Garden Waste Coop', siteId: 'SITE-014', region: 'Region G', focus: 'Organic & Garden Waste', mentor: 'Circular Energy' },
+  { id: 'COOP-015', name: 'Freedom Park Waste Collective', siteId: 'SITE-015', region: 'Region G', focus: 'Residential Recycling', mentor: 'Petco' },
+];
+
+function CooperativesSection({ sites, employees, logs }: { sites: any[]; employees: any[]; logs: any[] }) {
+  // Load cooperatives from localStorage (seeded with defaults)
+  const [cooperatives, setCooperatives] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('w2w_cooperatives');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return W2W_COOPERATIVES;
+  });
+
+  const [coopModal, setCoopModal] = useState<'add' | 'edit' | null>(null);
+  const [editingCoopId, setEditingCoopId] = useState<string | null>(null);
+  const [coopForm, setCoopForm] = useState({
+    name: '', registration: '', siteId: '', stage: 'Formation', proPartner: '', mentor: '', focus: '', notes: '', region: '',
+  });
+
+  const openAddCoop = () => {
+    setCoopForm({ name: '', registration: '', siteId: '', stage: 'Formation', proPartner: '', mentor: '', focus: '', notes: '', region: '' });
+    setEditingCoopId(null);
+    setCoopModal('add');
+  };
+  const openEditCoop = (co: any) => {
+    setCoopForm({
+      name: co.name || '', registration: co.registration || '', siteId: co.siteId || '',
+      stage: co.stage || 'Formation', proPartner: co.proPartner || '', mentor: co.mentor || '',
+      focus: co.focus || '', notes: co.notes || '', region: co.region || '',
+    });
+    setEditingCoopId(co.id);
+    setCoopModal('edit');
+  };
+  const deleteCoop = (co: any) => {
+    if (confirm(`Delete cooperative "${co.name}"?`)) {
+      saveCoops(cooperatives.filter((c: any) => c.id !== co.id));
+    }
+  };
+
+  // Persist cooperatives
+  const saveCoops = (coops: any[]) => {
+    setCooperatives(coops);
+    localStorage.setItem('w2w_cooperatives', JSON.stringify(coops));
+  };
+
+  const coopData = useMemo(() => {
+    return cooperatives.map((co: any) => {
+      const matchedSite = sites.find((s: any) =>
+        s.id === co.siteId ||
+        (s.name && co.name.toLowerCase().includes(s.name.toLowerCase().split(' ')[0]))
+      );
+      const siteId = matchedSite?.id;
+      const siteName = matchedSite?.name || '—';
+      const siteLogs = siteId ? logs.filter((l: any) => l.siteId === siteId) : [];
+      const rev = siteLogs.reduce((s: number, l: any) => s + (Number(l.totalValue) || 0), 0);
+      const members = siteId ? employees.filter((e: any) => e.siteId === siteId && (e.status || '').toUpperCase() === 'ACTIVE').length : 0;
+      return { ...co, siteName, rev: Math.round(rev), members, deliveries: siteLogs.length };
+    });
+  }, [cooperatives, sites, employees, logs]);
+
+  const activeCoops = coopData.filter((c: any) => c.rev > 0 || c.members > 0).length;
+
+  const handleSaveCoop = () => {
+    if (!coopForm.name.trim()) { alert('Cooperative name is required'); return; }
+    if (!coopForm.siteId) { alert('Please assign a site'); return; }
+    const selectedSite = sites.find((s: any) => s.id === coopForm.siteId);
+    if (coopModal === 'edit' && editingCoopId) {
+      saveCoops(cooperatives.map((c: any) => c.id === editingCoopId ? {
+        ...c, name: coopForm.name, siteId: coopForm.siteId,
+        region: selectedSite?.region || coopForm.region || c.region,
+        focus: coopForm.focus, mentor: coopForm.mentor || coopForm.proPartner || c.mentor,
+        registration: coopForm.registration, stage: coopForm.stage,
+        proPartner: coopForm.proPartner, notes: coopForm.notes,
+      } : c));
+    } else {
+      const newCoop = {
+        id: 'COOP-' + Date.now().toString(36).toUpperCase(),
+        name: coopForm.name, siteId: coopForm.siteId,
+        region: selectedSite?.region || coopForm.region || '',
+        focus: coopForm.focus, mentor: coopForm.mentor || coopForm.proPartner || 'SCM PMO',
+        registration: coopForm.registration, stage: coopForm.stage,
+        proPartner: coopForm.proPartner, notes: coopForm.notes,
+      };
+      saveCoops([...cooperatives, newCoop]);
+    }
+    setCoopModal(null);
+  };
+
+  return (
+    <>
+      <div className="card" style={{ marginTop: 0 }}>
+        <div className="ch">
+          <div className="ct">Cooperatives</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="cs">{cooperatives.length} cooperatives · {activeCoops} active</div>
+            <button className="btn btn-accent btn-sm" onClick={openAddCoop}><Plus size={12} /> Add Cooperative</button>
+          </div>
+        </div>
+        <div className="tw">
+          <table>
+            <thead>
+              <tr>
+                <th>Cooperative</th>
+                <th>Linked Site</th>
+                <th>Region</th>
+                <th>Focus</th>
+                <th>Mentor</th>
+                <th>Members</th>
+                <th>Deliveries</th>
+                <th>Revenue</th>
+                <th>Status</th>
+                <th style={{ width: 80 }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {coopData.map((co: any) => (
+                <tr key={co.id}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 14 }}>🤝</span>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 12 }}>{co.name}</div>
+                        <div style={{ fontSize: 10, color: 'var(--color-text3)', fontFamily: 'var(--mono, monospace)' }}>{co.id}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style={{ fontSize: 11 }}>{co.siteName}</td>
+                  <td><span className="badge bb" style={{ fontSize: 10 }}>{co.region}</span></td>
+                  <td style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{co.focus}</td>
+                  <td style={{ fontSize: 11 }}>{co.mentor}</td>
+                  <td style={{ textAlign: 'center', fontWeight: 600 }}>{co.members}</td>
+                  <td style={{ textAlign: 'center' }}>{co.deliveries}</td>
+                  <td style={{ fontWeight: 700, color: co.rev > 0 ? 'var(--color-green)' : 'var(--color-text3)' }}>
+                    {co.rev > 0 ? 'R ' + co.rev.toLocaleString() : '—'}
+                  </td>
+                  <td>
+                    {co.rev > 0 || co.members > 0
+                      ? <span style={{ color: 'var(--color-green)', fontWeight: 700, fontSize: 11 }}>● Active</span>
+                      : <span style={{ color: 'var(--color-text3)', fontSize: 11 }}>○ Formation</span>
+                    }
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <RowBtn title="Edit" onClick={() => openEditCoop(co)}><Edit2 size={13} /></RowBtn>
+                      <RowBtn title="Delete" danger onClick={() => deleteCoop(co)}><Trash2 size={13} /></RowBtn>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Add / Edit Cooperative Modal */}
+      {coopModal && (
+        <div className="modal-ov open" onClick={() => setCoopModal(null)}>
+          <div className="modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
+            <div className="mh">
+              <span className="mt">{coopModal === 'edit' ? `Edit ${coopForm.name || 'Cooperative'}` : 'Add Cooperative'}</span>
+              <button onClick={() => setCoopModal(null)} className="mc"><X size={15} /></button>
+            </div>
+            <div className="mb">
+              <div className="fgrid">
+                <div className="fg"><label className="fl">Cooperative Name <span className="req">*</span></label>
+                  <input className="fc" value={coopForm.name} onChange={(e) => setCoopForm({ ...coopForm, name: e.target.value })} placeholder="e.g. Diepsloot Greens Cooperative" />
+                </div>
+                <div className="fg"><label className="fl">Registration No.</label>
+                  <input className="fc" value={coopForm.registration} onChange={(e) => setCoopForm({ ...coopForm, registration: e.target.value })} placeholder="e.g. CK2023/001234" />
+                </div>
+                <div className="fg"><label className="fl">Assigned Site <span className="req">*</span></label>
+                  <select className="fc" value={coopForm.siteId} onChange={(e) => setCoopForm({ ...coopForm, siteId: e.target.value })}>
+                    <option value="">Select site</option>
+                    {sites.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div className="fg"><label className="fl">Stage</label>
+                  <select className="fc" value={coopForm.stage} onChange={(e) => setCoopForm({ ...coopForm, stage: e.target.value })}>
+                    <option>Formation</option>
+                    <option>Registered</option>
+                    <option>Active</option>
+                    <option>Inactive</option>
+                  </select>
+                </div>
+                <div className="fg"><label className="fl">PRO Partner</label>
+                  <select className="fc" value={coopForm.proPartner} onChange={(e) => setCoopForm({ ...coopForm, proPartner: e.target.value })}>
+                    <option value="">None</option>
+                    {(() => { const geo = loadGeography(); return (geo.proPartners || []).map((p: any) => <option key={p.id} value={p.name}>{p.name}</option>); })()}
+                  </select>
+                </div>
+                <div className="fg"><label className="fl">Mentor / PRO Partner</label>
+                  <input className="fc" value={coopForm.mentor} onChange={(e) => setCoopForm({ ...coopForm, mentor: e.target.value })} placeholder="Mentor or facilitator name" />
+                </div>
+                <div className="fg"><label className="fl">Focus / Activities</label>
+                  <input className="fc" value={coopForm.focus} onChange={(e) => setCoopForm({ ...coopForm, focus: e.target.value })} placeholder="e.g. Plastics, Paper, Mixed" />
+                </div>
+                <div className="fg full"><label className="fl">Notes</label>
+                  <input className="fc" value={coopForm.notes} onChange={(e) => setCoopForm({ ...coopForm, notes: e.target.value })} placeholder="Optional notes" />
+                </div>
+              </div>
+            </div>
+            <div className="mf">
+              <button className="btn btn-ghost" onClick={() => setCoopModal(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSaveCoop}>{coopModal === 'edit' ? 'Update Cooperative' : 'Add Cooperative'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

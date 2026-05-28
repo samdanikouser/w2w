@@ -8,7 +8,6 @@ import { authenticate, JWT_SECRET, type AuthRequest } from '../middleware/auth.j
 
 const router = Router();
 
-// ── Hard rate-limit on login: 10 attempts per 15 min per IP ──
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -22,7 +21,6 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-// ── Password policy: 10+ chars, mixed case, digit. Enforce on every write. ──
 const passwordPolicy = z
   .string()
   .min(10, 'Password must be at least 10 characters')
@@ -35,21 +33,18 @@ const changePasswordSchema = z.object({
   newPassword: passwordPolicy,
 });
 
-// ── POST /api/auth/login ──
 router.post('/login', loginLimiter, async (req, res, next) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase() },
-      include: { site: true },
+      include: { site: true, customRole: true },
     });
-    // Constant-time-ish failure: always run bcrypt to mask user-existence
     const hash = user?.passwordHash || '$2a$12$invalidplaceholderinvalidplaceholderinvalid';
     const valid = await bcrypt.compare(password, hash);
 
     if (!user || !user.isActive || !valid) {
-      // Audit failed login attempts on existing accounts
       if (user) {
         await prisma.auditLog.create({
           data: { userId: user.id, action: 'LOGIN_FAILED', entity: 'User', entityId: user.id, ipAddress: req.ip || null },
@@ -64,10 +59,11 @@ router.post('/login', loginLimiter, async (req, res, next) => {
       data: { userId: user.id, action: 'LOGIN', entity: 'User', entityId: user.id, ipAddress: req.ip || null },
     });
 
+    const loginModules = user.customRole?.modules || [];
     const token = jwt.sign(
-      { userId: user.id, role: user.role },
+      { userId: user.id, modules: loginModules, siteId: user.siteId },
       JWT_SECRET,
-      { expiresIn: '8h' },
+      { expiresIn: '8h' }
     );
 
     res.json({
@@ -76,9 +72,10 @@ router.post('/login', loginLimiter, async (req, res, next) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
         siteId: user.siteId,
         siteName: user.site?.name || null,
+        modules: loginModules,
+        roleName: user.customRole?.name || null,
       },
     });
   } catch (err) {
@@ -86,7 +83,88 @@ router.post('/login', loginLimiter, async (req, res, next) => {
   }
 });
 
-// ── POST /api/auth/change-password ──
+const registerSchema = z.object({
+  email: z.string().email(),
+  password: passwordPolicy,
+  name: z.string().min(1),
+  orgName: z.string().optional(),
+});
+
+router.post('/register', async (req, res, next) => {
+  try {
+    const { email, password, name, orgName } = registerSchema.parse(req.body);
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+    });
+
+    if (existingUser) {
+      return res.status(400).json({ error: 'User with this email already exists' });
+    }
+
+    let siteId = null;
+    if (orgName) {
+      const site = await prisma.site.create({
+        data: { name: orgName, type: 'COOPERATIVE', status: 'ACTIVE' },
+      });
+      siteId = site.id;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    
+    // Create an Admin role for this newly registered user
+    const ALL_MODULES = ['dashboard','sites','epr-reports','pl-register','reports','demographics','employees','onboarding','attendance','check-in-out','beneficiary','stock-register','stock-variance','vehicles','depots','depot-scanner','training','violations','audit-log','waste-logs','w2w-settings'];
+    
+    const adminRole = await prisma.customRole.create({
+      data: {
+        name: 'System Administrator - ' + (orgName || name),
+        description: 'Auto-generated admin role from registration',
+        modules: ALL_MODULES,
+        isActive: true
+      }
+    });
+
+    const user = await prisma.user.create({
+      data: {
+        email: email.toLowerCase(),
+        passwordHash,
+        name,
+        siteId,
+        customRoleId: adminRole.id,
+        isActive: true,
+      },
+      include: { site: true, customRole: true },
+    });
+
+    await prisma.auditLog.create({
+      data: { userId: user.id, action: 'REGISTER', entity: 'User', entityId: user.id, ipAddress: req.ip || null },
+    });
+
+    const regModules = adminRole.modules;
+
+    const token = jwt.sign(
+      { userId: user.id, modules: regModules, siteId: user.siteId },
+      JWT_SECRET,
+      { expiresIn: '8h' }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        siteId: user.siteId,
+        siteName: user.site?.name || null,
+        modules: regModules,
+        roleName: user.customRole?.name || null,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/change-password', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
@@ -109,22 +187,54 @@ router.post('/change-password', authenticate, async (req: AuthRequest, res, next
   }
 });
 
-// ── GET /api/auth/me ──
 router.get('/me', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
-      include: { site: true },
+      include: { site: true, customRole: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const meModules = user.customRole?.modules || [];
 
     res.json({
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role,
       siteId: user.siteId,
       siteName: user.site?.name || null,
+      modules: meModules,
+      roleName: user.customRole?.name || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/forgot-password', async (req, res, next) => {
+  try {
+    const { email } = z.object({ email: z.string().email() }).parse(req.body);
+
+    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (!user) {
+      return res.json({ message: 'If this email is registered, a temporary password has been generated.' });
+    }
+
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    let tempPassword = '';
+    for (let i = 0; i < 12; i++) tempPassword += chars[Math.floor(Math.random() * chars.length)];
+    tempPassword += 'A1!';
+
+    const hash = await bcrypt.hash(tempPassword, 12);
+    await prisma.user.update({ where: { id: user.id }, data: { passwordHash: hash } });
+
+    await prisma.auditLog.create({
+      data: { userId: user.id, action: 'UPDATE', entity: 'User', entityId: user.id, detail: 'Password reset via forgot-password' },
+    });
+
+    res.json({
+      message: 'Temporary password generated. Please change it after logging in.',
+      tempPassword,
     });
   } catch (err) {
     next(err);

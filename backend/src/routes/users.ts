@@ -2,11 +2,11 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
-router.use(authorize('SUPER_ADMIN'));
+router.use(requireModule('w2w-settings'));
 
 // Same password policy as auth.ts
 const passwordPolicy = z
@@ -39,7 +39,7 @@ router.get('/', async (_req, res, next) => {
         id: true,
         email: true,
         name: true,
-        role: true,
+        
         isActive: true,
         lastLogin: true,
         createdAt: true,
@@ -48,7 +48,7 @@ router.get('/', async (_req, res, next) => {
         employeeId: true,
         employee: { select: { id: true, firstName: true, lastName: true, empNo: true } },
         customRoleId: true,
-        customRole: { select: { id: true, name: true, systemRole: true } },
+        customRole: { select: { id: true, name: true, modules: true } },
       },
     });
     res.json(users);
@@ -75,11 +75,10 @@ router.post('/', async (req: AuthRequest, res, next) => {
     if (existing) return res.status(409).json({ error: 'Email already in use' });
 
     // Resolve the system role from the custom role
-    let systemRole: 'SUPER_ADMIN' | 'SITE_ADMIN' | 'DATA_CLERK' | 'FIELD_WORKER' = 'FIELD_WORKER';
+    
     if (d.customRoleId) {
       const cr = await prisma.customRole.findUnique({ where: { id: d.customRoleId } });
       if (!cr || !cr.isActive) return res.status(400).json({ error: 'Invalid custom role' });
-      systemRole = cr.systemRole as any;
     }
 
     const passwordHash = await bcrypt.hash(d.password, 12);
@@ -88,12 +87,12 @@ router.post('/', async (req: AuthRequest, res, next) => {
         email: d.email.toLowerCase(),
         passwordHash,
         name: `${emp.firstName} ${emp.lastName}`.trim(),
-        role: systemRole,
+        
         employeeId: emp.id,
         siteId: emp.siteId || null,
         customRoleId: d.customRoleId || null,
       },
-      select: { id: true, email: true, name: true, role: true, isActive: true, employeeId: true, customRoleId: true },
+      select: { id: true, email: true, name: true,  isActive: true, employeeId: true, customRoleId: true },
     });
 
     await prisma.auditLog.create({
@@ -119,11 +118,10 @@ router.put('/:id', async (req: AuthRequest, res, next) => {
     const d = updateSchema.parse(req.body);
 
     // Resolve system role if customRoleId is changing
-    let systemRole: 'SUPER_ADMIN' | 'SITE_ADMIN' | 'DATA_CLERK' | 'FIELD_WORKER' | undefined;
+    
     if (d.customRoleId) {
       const cr = await prisma.customRole.findUnique({ where: { id: d.customRoleId } });
       if (!cr || !cr.isActive) return res.status(400).json({ error: 'Invalid custom role' });
-      systemRole = cr.systemRole as any;
     }
 
     const data: any = {
@@ -131,13 +129,13 @@ router.put('/:id', async (req: AuthRequest, res, next) => {
       isActive: d.isActive,
       customRoleId: d.customRoleId === null ? null : d.customRoleId,
     };
-    if (systemRole) data.role = systemRole;
+    
     if (d.newPassword) data.passwordHash = await bcrypt.hash(d.newPassword, 12);
 
     const user = await prisma.user.update({
       where: { id: req.params.id as string },
       data,
-      select: { id: true, email: true, name: true, role: true, isActive: true, customRoleId: true },
+      select: { id: true, email: true, name: true,  isActive: true, customRoleId: true },
     });
 
     await prisma.auditLog.create({

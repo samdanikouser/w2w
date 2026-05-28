@@ -47,7 +47,7 @@ async function main() {
   }
 
   const passwordHash = await bcrypt.hash(adminPassword, 12);
-  await prisma.user.create({
+  const admin = await prisma.user.create({
     data: {
       email: adminEmail,
       passwordHash,
@@ -57,8 +57,19 @@ async function main() {
     },
   });
 
+  // Seed welcome notifications for the admin
+  await prisma.notification.createMany({
+    data: [
+      { userId: admin.id, type: 'SUCCESS', icon: '🎉', title: 'Welcome to W2W Platform', message: 'Your account has been set up successfully.', action: 'dashboard' },
+      { userId: admin.id, type: 'WARNING', icon: '🔐', title: 'Change your password', message: 'Please update your default password for security.', action: 'profile' },
+      { userId: admin.id, type: 'INFO', icon: '⚙', title: 'Configure your programme', message: 'Set up waste categories, training modules, and payment scales.', action: 'w2w-settings' },
+      { userId: admin.id, type: 'INFO', icon: '👥', title: 'Add your team', message: 'Create user accounts for your staff and assign roles.', action: 'w2w-settings' },
+    ],
+  });
+
   console.log(`✔ Bootstrap admin created: ${adminEmail}`);
   console.log('  CHANGE THE PASSWORD IMMEDIATELY after first login (Settings → Security).');
+  console.log('  4 welcome notifications seeded.');
 }
 
 main()

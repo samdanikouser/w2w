@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../stores/authStore';
 import {
-  Save, Building, Database, Users as UsersIcon, KeyRound,
+  Save, Building, Database, Users as UsersIcon, KeyRound, MapPin,
   Plus, X, Edit2, Trash2, CheckCircle2, ShieldAlert,
 } from 'lucide-react';
 import { exportCsv } from '../utils/csv';
@@ -10,7 +10,9 @@ import {
   auditLogsApi, employeesApi, rolesApi, usersApi,
   type CustomRolePayload, type SystemRole, type CreateUserPayload, type UpdateUserPayload,
 } from '../api/endpoints';
+import { ALL_MODULES, getModulesBySection } from '../config/moduleRegistry';
 import { RowBtn } from './SitesPage';
+import PasswordInput from '../components/ui/PasswordInput';
 
 const SYSTEM_ROLE_LABELS: Record<SystemRole, string> = {
   SUPER_ADMIN: 'Super Admin (full access)',
@@ -21,6 +23,7 @@ const SYSTEM_ROLE_LABELS: Record<SystemRole, string> = {
 
 const TABS = [
   { id: 'organisation', label: 'Organisation', icon: <Building size={13} />, adminOnly: false },
+  { id: 'geography', label: 'Geography', icon: <MapPin size={13} />, adminOnly: false },
   { id: 'users', label: 'Users', icon: <UsersIcon size={13} />, adminOnly: true },
   { id: 'roles', label: 'Roles', icon: <KeyRound size={13} />, adminOnly: true },
   { id: 'data', label: 'Data & POPIA', icon: <Database size={13} />, adminOnly: false },
@@ -31,7 +34,7 @@ export default function SettingsPage() {
   const [tab, setTab] = useState('organisation');
   const [toast, setToast] = useState<{ message: string; tone: 'green' | 'amber' | 'red' } | null>(null);
 
-  const isSuperAdmin = user?.role === 'super_admin';
+  const hasSettingsAccess = user?.modules?.includes('w2w-settings') || user?.modules?.includes('settings');
 
   const { data: auditEvents = [] } = useQuery({
     queryKey: ['audit-logs', 'export'],
@@ -40,7 +43,12 @@ export default function SettingsPage() {
 
   // Organisation prefs persisted locally for now (until /api/organisation lands)
   const [org, setOrg] = useState<Record<string, string>>(() => {
-    try { return JSON.parse(localStorage.getItem('w2w_org') || '{}'); } catch { return {}; }
+    try {
+      const saved = JSON.parse(localStorage.getItem('w2w_org') || '{}');
+      // Pre-populate with registration org name if not already set
+      if (!saved.orgName && user?.siteName) saved.orgName = user.siteName;
+      return saved;
+    } catch { return { orgName: user?.siteName || '' }; }
   });
   const setOrgField = (k: string, v: string) => setOrg((p) => ({ ...p, [k]: v }));
 
@@ -81,7 +89,7 @@ export default function SettingsPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const visibleTabs = TABS.filter((t) => !t.adminOnly || isSuperAdmin);
+  const visibleTabs = TABS.filter((t) => !t.adminOnly || hasSettingsAccess);
 
   return (
     <div>
@@ -105,10 +113,10 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {!isSuperAdmin && tab !== 'organisation' && tab !== 'data' && (
+      {!hasSettingsAccess && tab !== 'organisation' && tab !== 'data' && (
         <div className="alert alert-amber" style={{ marginBottom: 12 }}>
           <ShieldAlert size={14} />
-          <span>User & Role administration is restricted to Super Admins.</span>
+          <span>User & Role administration is restricted to Settings access holders.</span>
         </div>
       )}
 
@@ -142,16 +150,20 @@ export default function SettingsPage() {
             {tab === 'organisation' && (
               <>
                 <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.1em', borderBottom: '2px solid var(--color-w2w-light)', paddingBottom: 6, marginBottom: 14 }}>
-                  Application Identity
+                  Organisation Details
                 </div>
                 <div className="fgrid">
-                  <div className="fg"><label className="fl">App Name</label>
-                    <input className="fc" value={org.appName || 'W2W'} onChange={(e) => setOrgField('appName', e.target.value)} placeholder="Displayed in sidebar and login" />
+                  <div className="fg"><label className="fl">Organisation Name</label>
+                    <input className="fc" value={org.orgName || user?.siteName || ''} onChange={(e) => setOrgField('orgName', e.target.value)} placeholder="As registered" />
                   </div>
-                  <div className="fg"><label className="fl">Short Tagline</label>
-                    <input className="fc" value={org.tagline || 'Waste to Work'} onChange={(e) => setOrgField('tagline', e.target.value)} placeholder="Sub-line shown under the app name" />
+                  <div className="fg"><label className="fl">Admin Name</label>
+                    <input className="fc" value={user?.name || ''} disabled style={{ opacity: 0.6 }} />
+                  </div>
+                  <div className="fg"><label className="fl">Admin Email</label>
+                    <input className="fc" value={user?.email || ''} disabled style={{ opacity: 0.6 }} />
                   </div>
                 </div>
+
 
                 <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.1em', borderBottom: '2px solid var(--color-w2w-light)', paddingBottom: 6, margin: '20px 0 14px' }}>
                   Programme Information
@@ -205,8 +217,10 @@ export default function SettingsPage() {
               </>
             )}
 
-            {tab === 'users' && isSuperAdmin && <UsersTab onToast={setToast} />}
-            {tab === 'roles' && isSuperAdmin && <RolesTab onToast={setToast} />}
+            {tab === 'users' && hasSettingsAccess && <UsersTab onToast={setToast} />}
+            {tab === 'roles' && hasSettingsAccess && <RolesTab onToast={setToast} />}
+
+            {tab === 'geography' && <GeographyTab onToast={setToast} />}
 
             {tab === 'data' && (
               <>
@@ -240,7 +254,7 @@ export default function SettingsPage() {
 // ═══════════════════════════════════════════════════
 //  USERS TAB (super-admin only)
 // ═══════════════════════════════════════════════════
-function UsersTab({ onToast }: { onToast: (t: { message: string; tone: 'green' | 'amber' | 'red' }) => void }) {
+export function UsersTab({ onToast }: { onToast: (t: { message: string; tone: 'green' | 'amber' | 'red' }) => void }) {
   const qc = useQueryClient();
   const [modal, setModal] = useState<'add' | 'edit' | null>(null);
   const [active, setActive] = useState<any>(null);
@@ -350,7 +364,7 @@ function UsersTab({ onToast }: { onToast: (t: { message: string; tone: 'green' |
 
       {modal && (
         <div className="modal-ov open" onClick={() => setModal(null)}>
-          <div className="modal" style={{ width: 580 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ width: 720 }} onClick={(e) => e.stopPropagation()}>
             <div className="mh">
               <span className="mt">{modal === 'edit' ? `Edit User — ${active?.name}` : 'Add User'}</span>
               <button onClick={() => setModal(null)} className="mc"><X size={15} /></button>
@@ -395,12 +409,12 @@ function UsersTab({ onToast }: { onToast: (t: { message: string; tone: 'green' |
                 </div>
                 {modal === 'add' && (
                   <div className="fg"><label className="fl">Password <span className="req">*</span></label>
-                    <input className="fc" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Min 10 chars · upper, lower, digit" />
+                    <PasswordInput value={form.password || ''} onChange={(v) => setForm({ ...form, password: v })} placeholder="Min 10 chars · upper, lower, digit" />
                   </div>
                 )}
                 {modal === 'edit' && (
                   <div className="fg"><label className="fl">Reset Password</label>
-                    <input className="fc" type="password" value={form.newPassword || ''} onChange={(e) => setForm({ ...form, newPassword: e.target.value })} placeholder="Leave blank to keep current" />
+                    <PasswordInput value={form.newPassword || ''} onChange={(v) => setForm({ ...form, newPassword: v })} placeholder="Leave blank to keep current" />
                   </div>
                 )}
                 {modal === 'edit' && (
@@ -429,12 +443,12 @@ function UsersTab({ onToast }: { onToast: (t: { message: string; tone: 'green' |
 // ═══════════════════════════════════════════════════
 //  ROLES TAB (super-admin only)
 // ═══════════════════════════════════════════════════
-function RolesTab({ onToast }: { onToast: (t: { message: string; tone: 'green' | 'amber' | 'red' }) => void }) {
+export function RolesTab({ onToast }: { onToast: (t: { message: string; tone: 'green' | 'amber' | 'red' }) => void }) {
   const qc = useQueryClient();
   const [modal, setModal] = useState<'add' | 'edit' | null>(null);
   const [active, setActive] = useState<any>(null);
   const [form, setForm] = useState<CustomRolePayload>({
-    name: '', description: '', systemRole: 'FIELD_WORKER', isActive: true,
+    name: '', description: '', systemRole: 'FIELD_WORKER', isActive: true, modules: [],
   });
 
   const { data: roles = [] } = useQuery({ queryKey: ['roles'], queryFn: () => rolesApi.list() });
@@ -456,11 +470,11 @@ function RolesTab({ onToast }: { onToast: (t: { message: string; tone: 'green' |
   });
 
   const openAdd = () => {
-    setForm({ name: '', description: '', systemRole: 'FIELD_WORKER', isActive: true });
+    setForm({ name: '', description: '', systemRole: 'SUPER_ADMIN', isActive: true, modules: [] });
     setActive(null); setModal('add');
   };
   const openEdit = (r: any) => {
-    setForm({ name: r.name, description: r.description, systemRole: r.systemRole, isActive: r.isActive });
+    setForm({ name: r.name, description: r.description, systemRole: r.systemRole, isActive: r.isActive, modules: r.modules || [] });
     setActive(r); setModal('edit');
   };
   const save = () => {
@@ -479,8 +493,8 @@ function RolesTab({ onToast }: { onToast: (t: { message: string; tone: 'green' |
     <>
       <div className="alert alert-blue">
         <span>
-          Each role maps to one of four <b>permission tiers</b> that the backend enforces. The role's <b>name</b> is the human label users see;
-          the <b>tier</b> determines what they can actually do.
+          Create roles and assign <b>module access</b> to control which sections of the platform each role can see.
+          Users assigned to a role will only see the modules you select. Use the <b>Module Access</b> checklist when adding or editing a role.
         </span>
       </div>
 
@@ -494,18 +508,18 @@ function RolesTab({ onToast }: { onToast: (t: { message: string; tone: 'green' |
       <div className="tw">
         <table>
           <thead>
-            <tr><th>Role Name</th><th>Permission Tier</th><th>Description</th><th>Users</th><th>Status</th><th style={{ width: 80 }}>Actions</th></tr>
+            <tr><th>Role Name</th><th>Modules</th><th>Description</th><th>Users</th><th>Status</th><th style={{ width: 80 }}>Actions</th></tr>
           </thead>
           <tbody>
             {(roles as any[]).length === 0 ? (
-              <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>
+              <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>
                 No custom roles yet. Click "Add Role" to define one (e.g. "HR Manager", "Yard Supervisor").
               </td></tr>
             ) : (
               (roles as any[]).map((r: any) => (
                 <tr key={r.id}>
                   <td style={{ fontWeight: 700 }}>{r.name}</td>
-                  <td><span className="badge bb">{r.systemRole.replace(/_/g, ' ')}</span></td>
+                  <td style={{ fontSize: 11, color: 'var(--color-text2)' }}>{(r.modules?.length ?? 0)} modules</td>
                   <td style={{ fontSize: 11, color: 'var(--color-text2)' }}>{r.description || '—'}</td>
                   <td style={{ fontWeight: 600 }}>{r._count?.users ?? 0}</td>
                   <td><span className={r.isActive ? 'badge bg' : 'badge bk'}>{r.isActive ? 'Active' : 'Disabled'}</span></td>
@@ -524,7 +538,7 @@ function RolesTab({ onToast }: { onToast: (t: { message: string; tone: 'green' |
 
       {modal && (
         <div className="modal-ov open" onClick={() => setModal(null)}>
-          <div className="modal" style={{ width: 540 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ width: 720 }} onClick={(e) => e.stopPropagation()}>
             <div className="mh">
               <span className="mt">{modal === 'edit' ? 'Edit Role' : 'Add Role'}</span>
               <button onClick={() => setModal(null)} className="mc"><X size={15} /></button>
@@ -537,16 +551,56 @@ function RolesTab({ onToast }: { onToast: (t: { message: string; tone: 'green' |
                 <div className="full"><div className="fg"><label className="fl">Description</label>
                   <textarea className="fc" value={form.description || ''} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What does this role do?" />
                 </div></div>
-                <div className="fg"><label className="fl">Permission Tier <span className="req">*</span></label>
-                  <select className="fc" value={form.systemRole} onChange={(e) => setForm({ ...form, systemRole: e.target.value as SystemRole })}>
-                    {Object.entries(SYSTEM_ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                  </select>
-                </div>
                 <div className="fg"><label className="fl">Status</label>
                   <select className="fc" value={form.isActive ? 'true' : 'false'} onChange={(e) => setForm({ ...form, isActive: e.target.value === 'true' })}>
                     <option value="true">Active</option>
                     <option value="false">Disabled</option>
                   </select>
+                </div>
+                <div className="full">
+                  <div className="fg">
+                    <label className="fl">Module Access</label>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                      <button type="button" className="btn btn-ghost" style={{ fontSize: 10, padding: '4px 8px' }}
+                        onClick={() => setForm({ ...form, modules: ALL_MODULES.map(m => m.id) })}>
+                        Select All
+                      </button>
+                      <button type="button" className="btn btn-ghost" style={{ fontSize: 10, padding: '4px 8px' }}
+                        onClick={() => setForm({ ...form, modules: [] })}>
+                        Deselect All
+                      </button>
+                    </div>
+                    <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 8, padding: 12 }}>
+                      {getModulesBySection().map(({ section, modules: mods }) => (
+                        <div key={section} style={{ marginBottom: 12 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+                            {section}
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {mods.map((m) => (
+                              <label key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer', padding: '4px 0' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={(form.modules || []).includes(m.id)}
+                                  onChange={(e) => {
+                                    const current = form.modules || [];
+                                    setForm({
+                                      ...form,
+                                      modules: e.target.checked
+                                        ? [...current, m.id]
+                                        : current.filter((id: string) => id !== m.id),
+                                    });
+                                  }}
+                                  style={{ width: 14, height: 14, accentColor: 'var(--color-accent)' }}
+                                />
+                                {m.label}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -555,6 +609,201 @@ function RolesTab({ onToast }: { onToast: (t: { message: string; tone: 'green' |
               <button className="btn btn-primary" onClick={save} disabled={createMut.isPending || updateMut.isPending}>
                 {(createMut.isPending || updateMut.isPending) ? 'Saving…' : modal === 'edit' ? 'Update' : 'Create Role'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+//  Geography Tab — Province / Municipality / Sub-Region
+// ═══════════════════════════════════════════════════
+import { loadGeography, saveGeography } from '../utils/geography';
+
+function GeographyTab({ onToast }: { onToast: (t: { message: string; tone: 'green' | 'amber' | 'red' }) => void }) {
+  const [geo, setGeo] = useState(loadGeography);
+  const [editModal, setEditModal] = useState<{ type: 'province' | 'municipality' | 'subRegion'; mode: 'add' | 'edit'; item?: any } | null>(null);
+  const [form, setForm] = useState<any>({});
+
+  const persist = (updated: any) => { setGeo(updated); saveGeography(updated); };
+
+  const openAdd = (type: 'province' | 'municipality' | 'subRegion') => {
+    setForm({});
+    setEditModal({ type, mode: 'add' });
+  };
+  const openEdit = (type: 'province' | 'municipality' | 'subRegion', item: any) => {
+    setForm({ ...item });
+    setEditModal({ type, mode: 'edit', item });
+  };
+  const remove = (type: 'province' | 'municipality' | 'subRegion', id: string) => {
+    const key = type === 'province' ? 'provinces' : type === 'municipality' ? 'municipalities' : 'subRegions';
+    if (!confirm('Delete this entry?')) return;
+    persist({ ...geo, [key]: geo[key].filter((x: any) => x.id !== id) });
+    onToast({ message: 'Deleted.', tone: 'green' });
+  };
+  const handleSave = () => {
+    if (!editModal) return;
+    const { type, mode, item } = editModal;
+    const key = type === 'province' ? 'provinces' : type === 'municipality' ? 'municipalities' : 'subRegions';
+    if (!form.name?.trim()) { alert('Name is required'); return; }
+    if (mode === 'edit' && item) {
+      persist({ ...geo, [key]: geo[key].map((x: any) => x.id === item.id ? { ...x, ...form } : x) });
+    } else {
+      const prefix = type === 'province' ? 'PROV' : type === 'municipality' ? 'MUN' : 'SR';
+      const newItem = { ...form, id: prefix + '-' + Date.now().toString(36).toUpperCase() };
+      persist({ ...geo, [key]: [...geo[key], newItem] });
+    }
+    setEditModal(null);
+    onToast({ message: mode === 'edit' ? 'Updated.' : 'Added.', tone: 'green' });
+  };
+
+  const sectionStyle = { marginBottom: 24 };
+  const headStyle: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.1em', borderBottom: '2px solid var(--color-w2w-light)', paddingBottom: 6, marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
+
+  return (
+    <>
+      {/* Provinces */}
+      <div style={sectionStyle}>
+        <div style={headStyle}>
+          <span>🇿🇦 Provinces ({geo.provinces.length})</span>
+          <button className="btn btn-accent btn-sm" onClick={() => openAdd('province')}><Plus size={11} /> Add Province</button>
+        </div>
+        <div className="tw">
+          <table>
+            <thead><tr><th>Name</th><th>Code</th><th>Premier</th><th style={{ width: 80 }}>Actions</th></tr></thead>
+            <tbody>
+              {geo.provinces.map((p: any) => (
+                <tr key={p.id}>
+                  <td style={{ fontWeight: 600 }}>{p.name}</td>
+                  <td><span className="badge bb">{p.code}</span></td>
+                  <td style={{ fontSize: 11 }}>{p.premier || '—'}</td>
+                  <td><div style={{ display: 'flex', gap: 4 }}>
+                    <RowBtn title="Edit" onClick={() => openEdit('province', p)}><Edit2 size={13} /></RowBtn>
+                    <RowBtn title="Delete" danger onClick={() => remove('province', p.id)}><Trash2 size={13} /></RowBtn>
+                  </div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Municipalities */}
+      <div style={sectionStyle}>
+        <div style={headStyle}>
+          <span>🏛 Municipalities ({geo.municipalities.length})</span>
+          <button className="btn btn-accent btn-sm" onClick={() => openAdd('municipality')}><Plus size={11} /> Add Municipality</button>
+        </div>
+        <div className="tw">
+          <table>
+            <thead><tr><th>Name</th><th>Code</th><th>Type</th><th>Province</th><th style={{ width: 80 }}>Actions</th></tr></thead>
+            <tbody>
+              {geo.municipalities.map((m: any) => (
+                <tr key={m.id}>
+                  <td style={{ fontWeight: 600 }}>{m.name}</td>
+                  <td><span className="badge bb">{m.code}</span></td>
+                  <td style={{ fontSize: 11 }}>{m.type || '—'}</td>
+                  <td style={{ fontSize: 11 }}>{geo.provinces.find((p: any) => p.id === m.provinceId)?.name || '—'}</td>
+                  <td><div style={{ display: 'flex', gap: 4 }}>
+                    <RowBtn title="Edit" onClick={() => openEdit('municipality', m)}><Edit2 size={13} /></RowBtn>
+                    <RowBtn title="Delete" danger onClick={() => remove('municipality', m.id)}><Trash2 size={13} /></RowBtn>
+                  </div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Sub-Regions */}
+      <div style={sectionStyle}>
+        <div style={headStyle}>
+          <span>📍 Sub-Regions / Planning Regions ({geo.subRegions.length})</span>
+          <button className="btn btn-accent btn-sm" onClick={() => openAdd('subRegion')}><Plus size={11} /> Add Sub-Region</button>
+        </div>
+        <div className="tw">
+          <table>
+            <thead><tr><th>Name</th><th>Code</th><th>Description</th><th>Municipality</th><th style={{ width: 80 }}>Actions</th></tr></thead>
+            <tbody>
+              {geo.subRegions.map((sr: any) => (
+                <tr key={sr.id}>
+                  <td style={{ fontWeight: 600 }}>{sr.name}</td>
+                  <td><span className="badge bb">{sr.code}</span></td>
+                  <td style={{ fontSize: 11, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sr.description || '—'}</td>
+                  <td style={{ fontSize: 11 }}>{geo.municipalities.find((m: any) => m.id === sr.municipalityId)?.name || '—'}</td>
+                  <td><div style={{ display: 'flex', gap: 4 }}>
+                    <RowBtn title="Edit" onClick={() => openEdit('subRegion', sr)}><Edit2 size={13} /></RowBtn>
+                    <RowBtn title="Delete" danger onClick={() => remove('subRegion', sr.id)}><Trash2 size={13} /></RowBtn>
+                  </div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Add/Edit Modal */}
+      {editModal && (
+        <div className="modal-ov open" onClick={() => setEditModal(null)}>
+          <div className="modal" style={{ width: 560 }} onClick={(e) => e.stopPropagation()}>
+            <div className="mh">
+              <span className="mt">{editModal.mode === 'edit' ? 'Edit' : 'Add'} {editModal.type === 'province' ? 'Province' : editModal.type === 'municipality' ? 'Municipality' : 'Sub-Region'}</span>
+              <button onClick={() => setEditModal(null)} className="mc"><X size={15} /></button>
+            </div>
+            <div className="mb">
+              <div className="fgrid">
+                <div className="fg"><label className="fl">Name <span className="req">*</span></label>
+                  <input className="fc" value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Gauteng / City of Johannesburg / Planning Region C" />
+                </div>
+                <div className="fg"><label className="fl">Code</label>
+                  <input className="fc" value={form.code || ''} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. GP / COJ / C" />
+                </div>
+
+                {editModal.type === 'province' && (
+                  <div className="fg"><label className="fl">Premier</label>
+                    <input className="fc" value={form.premier || ''} onChange={(e) => setForm({ ...form, premier: e.target.value })} placeholder="e.g. Panyaza Lesufi" />
+                  </div>
+                )}
+
+                {editModal.type === 'municipality' && (
+                  <>
+                    <div className="fg"><label className="fl">Type</label>
+                      <select className="fc" value={form.type || ''} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                        <option value="">Select</option>
+                        <option>Metropolitan</option>
+                        <option>District</option>
+                        <option>Local</option>
+                      </select>
+                    </div>
+                    <div className="fg"><label className="fl">Province</label>
+                      <select className="fc" value={form.provinceId || ''} onChange={(e) => setForm({ ...form, provinceId: e.target.value })}>
+                        <option value="">Select</option>
+                        {geo.provinces.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+
+                {editModal.type === 'subRegion' && (
+                  <>
+                    <div className="fg full"><label className="fl">Description</label>
+                      <input className="fc" value={form.description || ''} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Areas covered" />
+                    </div>
+                    <div className="fg"><label className="fl">Municipality</label>
+                      <select className="fc" value={form.municipalityId || ''} onChange={(e) => setForm({ ...form, municipalityId: e.target.value })}>
+                        <option value="">Select</option>
+                        {geo.municipalities.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="mf">
+              <button className="btn btn-ghost" onClick={() => setEditModal(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSave}>{editModal.mode === 'edit' ? 'Update' : 'Add'}</button>
             </div>
           </div>
         </div>

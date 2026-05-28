@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavStore } from '../../stores/navStore';
 import { useAuthStore } from '../../stores/authStore';
+import { notificationsApi } from '../../api/endpoints';
+import type { Notification } from '../../api/endpoints';
 import { Search, Bell, X, User, Settings, LogOut, ChevronDown, HelpCircle } from 'lucide-react';
 
 const PAGE_TITLES: Record<string, string> = {
@@ -25,6 +28,8 @@ const PAGE_TITLES: Record<string, string> = {
   'depot-scanner': 'Depot Scanner',
   violations: 'Warnings & Violations',
   profile: 'My Profile',
+  'w2w-settings': 'W2W Settings',
+  'help-docs': 'Help & Documentation',
 };
 
 const PAGE_SUBTITLES: Record<string, string> = {
@@ -49,28 +54,16 @@ const PAGE_SUBTITLES: Record<string, string> = {
   'stock-register': 'PPE, consumables, equipment',
   'stock-variance': 'Reconciliation report',
   profile: 'Personal info, notifications, security',
+  'w2w-settings': 'Waste categories, training, payments, cost centers',
+  'help-docs': 'Guides, FAQ, shortcuts & support',
 };
 
-const AVATAR_COLORS: Record<string, string> = {
-  super_admin: '#146484',
-  site_admin: '#00c896',
-  data_clerk: '#d97706',
-  field_worker: '#6d28d9',
-};
-
-const ROLE_LABELS: Record<string, string> = {
-  super_admin: 'ADMIN',
-  site_admin: 'SITE',
-  data_clerk: 'CLERK',
-  field_worker: 'FIELD',
-};
-
-const ROLE_FULL: Record<string, string> = {
-  super_admin: 'IT Administrator',
-  site_admin: 'Site Supervisor',
-  data_clerk: 'Administrator',
-  field_worker: 'Field Worker',
-};
+function avatarColor(id: string): string {
+  const palette = ['#146484', '#00c896', '#d97706', '#6d28d9', '#c0392b', '#1a9ec4', '#10b981', '#9b7fe8'];
+  let h = 0;
+  for (let i = 0; i < (id || '').length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return palette[h % palette.length];
+}
 
 export default function TopBar() {
   const { activePage, setActivePage } = useNavStore();
@@ -95,20 +88,67 @@ export default function TopBar() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const NOTIFS = [
-    { id: 'n1', icon: '♻', title: '12 waste logs awaiting approval', time: '2m ago', tone: 'amber' as const, action: 'waste-logs' },
-    { id: 'n2', icon: '🚛', title: 'JG 552-991 service due in 3 days', time: '1h ago', tone: 'red' as const, action: 'vehicles' },
-    { id: 'n3', icon: '🎓', title: '3 training certifications expiring this month', time: '4h ago', tone: 'amber' as const, action: 'training' },
-    { id: 'n4', icon: '📈', title: 'April EPR submission approved', time: 'Yesterday', tone: 'green' as const, action: 'epr-reports' },
-  ];
-  const unread = NOTIFS.length;
+  // ── Production notification system (API-backed) ──
+  const queryClient = useQueryClient();
+
+  const { data: notifs = [] } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: () => notificationsApi.list({ limit: 20 }),
+    refetchInterval: 30_000, // poll every 30s for new notifications
+    enabled: !!user,
+  });
+
+  const { data: unreadData } = useQuery({
+    queryKey: ['notifications-unread-count'],
+    queryFn: () => notificationsApi.unreadCount(),
+    refetchInterval: 30_000,
+    enabled: !!user,
+  });
+
+  const unread = unreadData?.count ?? notifs.filter((n: Notification) => !n.read).length;
+
+  const invalidateNotifs = () => {
+    queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
+  };
+
+  const markAsReadMut = useMutation({
+    mutationFn: (id: string) => notificationsApi.markAsRead(id),
+    onSuccess: invalidateNotifs,
+  });
+
+  const markAllAsReadMut = useMutation({
+    mutationFn: () => notificationsApi.markAllAsRead(),
+    onSuccess: invalidateNotifs,
+  });
+
+  const dismissMut = useMutation({
+    mutationFn: (id: string) => notificationsApi.dismiss(id),
+    onSuccess: invalidateNotifs,
+  });
+
+  const markAsRead = (id: string) => markAsReadMut.mutate(id);
+  const markAllAsRead = () => markAllAsReadMut.mutate();
+  const dismissNotif = (id: string) => dismissMut.mutate(id);
+
+  const formatRelativeTime = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days === 1) return 'Yesterday';
+    return `${days}d ago`;
+  };
 
   const initials = user
     ? user.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
     : '';
-  const avatarColor = user ? (AVATAR_COLORS[user.role] || '#146484') : '#146484';
-  const roleLabel = user ? (ROLE_LABELS[user.role] || user.role.replace(/_/g, ' ').toUpperCase()) : '';
-  const roleFull = user ? (ROLE_FULL[user.role] || user.role) : '';
+  const avColor = user ? avatarColor(user.id) : '#146484';
+  const roleLabel = user ? (user.roleName?.toUpperCase() || user.role.replace(/_/g, ' ').toUpperCase()) : '';
+  const roleFull = user ? (user.roleName || user.role.replace(/_/g, ' ')) : '';
   const firstName = user ? user.name.split(' ')[0] : '';
 
   return (
@@ -208,7 +248,7 @@ export default function TopBar() {
       </div>
 
       {/* ── Quick action: Help ── */}
-      <IconButton title="Help & docs" onClick={() => window.open('https://docs.w2w.example', '_blank')}>
+      <IconButton title="Help & docs" onClick={() => setActivePage('help-docs')}>
         <HelpCircle size={15} />
       </IconButton>
 
@@ -288,10 +328,16 @@ export default function TopBar() {
                 </button>
               </div>
               <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-                {NOTIFS.map((n) => (
+                {notifs.length === 0 && (
+                  <div style={{ padding: '30px 16px', textAlign: 'center', color: 'var(--color-text3)', fontSize: 12 }}>
+                    🎉 You're all caught up!
+                  </div>
+                )}
+                {notifs.map((n) => (
                   <div
                     key={n.id}
                     onClick={() => {
+                      markAsRead(n.id);
                       if (n.action) setActivePage(n.action);
                       setShowNotifs(false);
                     }}
@@ -302,17 +348,26 @@ export default function TopBar() {
                       borderBottom: '1px solid var(--color-surface3)',
                       cursor: 'pointer',
                       transition: 'background 0.15s',
+                      background: n.read ? 'transparent' : 'var(--color-w2w-pale)',
+                      opacity: n.read ? 0.6 : 1,
                     }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-surface2)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = n.read ? 'transparent' : 'var(--color-w2w-pale)')}
                   >
+                    {/* Unread dot */}
+                    <div style={{ width: 6, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                      {!n.read && (
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-w2w)' }} />
+                      )}
+                    </div>
                     <div
                       style={{
                         width: 30, height: 30, borderRadius: 7, flexShrink: 0,
                         background:
-                          n.tone === 'red' ? 'var(--color-red-light)' :
-                          n.tone === 'amber' ? 'var(--color-amber-light)' :
-                          'var(--color-green-light)',
+                          n.type === 'ERROR' ? 'var(--color-red-light)' :
+                          n.type === 'WARNING' ? 'var(--color-amber-light)' :
+                          n.type === 'SUCCESS' ? 'var(--color-green-light)' :
+                          'var(--color-surface3)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: 15,
                       }}
@@ -320,31 +375,45 @@ export default function TopBar() {
                       {n.icon}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, color: 'var(--color-text)', fontWeight: 500, lineHeight: 1.4 }}>
+                      <div style={{ fontSize: 12, color: 'var(--color-text)', fontWeight: n.read ? 400 : 600, lineHeight: 1.4 }}>
                         {n.title}
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--color-text3)', marginTop: 2 }}>{n.time}</div>
+                      <div style={{ fontSize: 10, color: 'var(--color-text3)', marginTop: 2 }}>{formatRelativeTime(n.createdAt)}</div>
                     </div>
+                    {/* Dismiss button */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); dismissNotif(n.id); }}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'var(--color-text3)', padding: 2, flexShrink: 0,
+                        borderRadius: 4, display: 'flex', alignItems: 'center',
+                      }}
+                      title="Dismiss"
+                    >
+                      <X size={11} />
+                    </button>
                   </div>
                 ))}
               </div>
-              <button
-                onClick={() => setShowNotifs(false)}
-                style={{
-                  width: '100%',
-                  padding: 10,
-                  background: 'var(--color-surface2)',
-                  border: 'none',
-                  borderTop: '1px solid var(--color-border)',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: 'var(--color-w2w)',
-                  cursor: 'pointer',
-                  fontFamily: 'var(--font-sans)',
-                }}
-              >
-                Mark all as read
-              </button>
+              {notifs.length > 0 && (
+                <button
+                  onClick={markAllAsRead}
+                  style={{
+                    width: '100%',
+                    padding: 10,
+                    background: 'var(--color-surface2)',
+                    border: 'none',
+                    borderTop: '1px solid var(--color-border)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: unread > 0 ? 'var(--color-w2w)' : 'var(--color-text3)',
+                    cursor: unread > 0 ? 'pointer' : 'default',
+                    fontFamily: 'var(--font-sans)',
+                  }}
+                >
+                  {unread > 0 ? 'Mark all as read' : 'All read ✓'}
+                </button>
+              )}
             </div>
           </>
         )}
@@ -375,7 +444,7 @@ export default function TopBar() {
                 width: 28, height: 28, borderRadius: '50%',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 11, fontWeight: 800, color: 'white',
-                background: avatarColor,
+                background: avColor,
                 flexShrink: 0,
               }}
             >
@@ -429,7 +498,7 @@ export default function TopBar() {
                       width: 40, height: 40, borderRadius: '50%',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 14, fontWeight: 800, color: 'white',
-                      background: avatarColor,
+                      background: avColor,
                       flexShrink: 0,
                     }}
                   >
@@ -452,10 +521,7 @@ export default function TopBar() {
                 <MenuItem icon={<User size={13} />} onClick={() => { setShowUserMenu(false); setActivePage('profile'); }}>
                   My Profile
                 </MenuItem>
-                <MenuItem icon={<Settings size={13} />} onClick={() => { setShowUserMenu(false); setActivePage('settings'); }}>
-                  Settings
-                </MenuItem>
-                <MenuItem icon={<HelpCircle size={13} />} onClick={() => { setShowUserMenu(false); window.open('https://docs.w2w.example', '_blank'); }}>
+                <MenuItem icon={<HelpCircle size={13} />} onClick={() => { setShowUserMenu(false); setActivePage('help-docs'); }}>
                   Help & Docs
                 </MenuItem>
                 <div style={{ borderTop: '1px solid var(--color-border)' }}>

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
@@ -9,6 +9,7 @@ router.use(authenticate);
 const moduleSchema = z.object({
   name: z.string().min(1),
   description: z.string().default(''),
+  type: z.string().default('MANDATORY'),
   durationHrs: z.number().default(0),
   isActive: z.boolean().default(true),
 });
@@ -35,7 +36,7 @@ router.get('/modules', async (_req, res, next) => {
   }
 });
 
-router.post('/modules', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.post('/modules', requireModule('training'), async (req: AuthRequest, res, next) => {
   try {
     const data = moduleSchema.parse(req.body);
     const m = await prisma.trainingModule.create({ data });
@@ -48,7 +49,7 @@ router.post('/modules', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: Auth
   }
 });
 
-router.put('/modules/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.put('/modules/:id', requireModule('training'), async (req: AuthRequest, res, next) => {
   try {
     const data = moduleSchema.partial().parse(req.body);
     const m = await prisma.trainingModule.update({ where: { id: req.params.id as string }, data });
@@ -61,7 +62,7 @@ router.put('/modules/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: A
   }
 });
 
-router.delete('/modules/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/modules/:id', requireModule('training'), async (req: AuthRequest, res, next) => {
   try {
     await prisma.trainingModule.delete({ where: { id: req.params.id as string } });
     await prisma.auditLog.create({
@@ -89,7 +90,7 @@ router.get('/records', async (_req, res, next) => {
   }
 });
 
-router.post('/records', authorize('SUPER_ADMIN', 'SITE_ADMIN', 'DATA_CLERK'), async (req: AuthRequest, res, next) => {
+router.post('/records', requireModule('training'), async (req: AuthRequest, res, next) => {
   try {
     const data = enrolmentSchema.parse(req.body);
     const r = await prisma.employeeTraining.create({
@@ -111,7 +112,7 @@ router.post('/records', authorize('SUPER_ADMIN', 'SITE_ADMIN', 'DATA_CLERK'), as
   }
 });
 
-router.put('/records/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN', 'DATA_CLERK'), async (req: AuthRequest, res, next) => {
+router.put('/records/:id', requireModule('training'), async (req: AuthRequest, res, next) => {
   try {
     const data = enrolmentSchema.partial().parse(req.body);
     const r = await prisma.employeeTraining.update({
@@ -129,7 +130,7 @@ router.put('/records/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN', 'DATA_CLERK'),
   }
 });
 
-router.delete('/records/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/records/:id', requireModule('training'), async (req: AuthRequest, res, next) => {
   try {
     await prisma.employeeTraining.delete({ where: { id: req.params.id as string } });
     res.json({ message: 'Record deleted' });

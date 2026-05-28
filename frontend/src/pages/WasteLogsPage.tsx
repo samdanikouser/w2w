@@ -37,12 +37,16 @@ export default function WasteLogsPage() {
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0],
     siteId: '',
-    wasteTypeId: '',
-    quantity: '',
-    pricePerUnit: '',
+    depotId: '',
     collectorId: '',
     notes: '',
   });
+  const [wasteInputs, setWasteInputs] = useState<Record<string, number>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  function genDN() {
+    return 'DN-' + String(Math.floor(Math.random() * 90000) + 10000);
+  }
 
   // ── Queries ──
   const { data, isLoading } = useQuery({
@@ -107,52 +111,77 @@ export default function WasteLogsPage() {
   const pendingCount = logs.filter((l: any) => l.status === 'PENDING').length;
 
   // ── Mutations ──
-  const createMut = useMutation({
-    mutationFn: (payload: WasteLogPayload) => wasteLogsApi.create(payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['waste-logs'] });
-      setShowModal(false);
-      setForm({ date: new Date().toISOString().split('T')[0], siteId: '', wasteTypeId: '', quantity: '', pricePerUnit: '', collectorId: '', notes: '' });
-    },
-  });
   const approveMut = useMutation({ mutationFn: (id: string) => wasteLogsApi.approve(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['waste-logs'] }) });
   const rejectMut = useMutation({ mutationFn: (id: string) => wasteLogsApi.reject(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['waste-logs'] }) });
   const deleteMut = useMutation({ mutationFn: (id: string) => wasteLogsApi.delete(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['waste-logs'] }) });
 
-  const handleSave = () => {
-    const qty = parseFloat(form.quantity) || 0;
-    if (qty <= 0) return;
-    createMut.mutate({
-      date: form.date,
-      siteId: form.siteId || null,
-      wasteTypeId: form.wasteTypeId || null,
-      quantity: qty,
-      pricePerUnit: parseFloat(form.pricePerUnit) || 0,
-      collectorId: form.collectorId || null,
-      notes: form.notes || undefined,
-    });
+  const handleSave = async () => {
+    setIsSubmitting(true);
+    try {
+      const dnRef = genDN();
+      const activeCats = wasteTypeList.filter((c: any) => wasteInputs[c.id] > 0);
+      
+      if (activeCats.length === 0) {
+        alert("Please enter at least one waste quantity.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      const promises = activeCats.map((c: any) => {
+        const qty = wasteInputs[c.id];
+        let depotName = '';
+        if (form.depotId) {
+          const d = sites.find((s: any) => s.id === form.depotId);
+          if (d) depotName = d.name;
+        }
+
+        const noteStr = [
+          `Ref: ${dnRef}`,
+          depotName ? `Depot: ${depotName}` : '',
+          form.notes ? `Notes: ${form.notes}` : '',
+        ].filter(Boolean).join(' | ');
+
+        return wasteLogsApi.create({
+          date: form.date,
+          siteId: form.siteId || null,
+          quantity: qty,
+          unit: c.unit || 'kg',
+          pricePerUnit: c.pricePerUnit,
+          wasteTypeId: c.id,
+          collectorId: form.collectorId || null,
+          notes: noteStr,
+        });
+      });
+
+      await Promise.all(promises);
+      
+      queryClient.invalidateQueries({ queryKey: ['waste-logs'] });
+      setShowModal(false);
+      setForm({ date: new Date().toISOString().split('T')[0], siteId: '', depotId: '', collectorId: '', notes: '' });
+      setWasteInputs({});
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save waste collection.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleDelete = (id: string) => {
     if (confirm('Delete this waste log entry?')) deleteMut.mutate(id);
   };
 
-  // ── Auto-fill price when waste type changes ──
-  const onWasteTypeChange = (id: string) => {
-    const t = wasteTypeList.find((w: any) => w.id === id);
-    setForm((f) => ({
-      ...f,
-      wasteTypeId: id,
-      pricePerUnit: t?.pricePerUnit != null ? String(t.pricePerUnit) : f.pricePerUnit,
-    }));
-  };
+  const totalInputKg = useMemo(
+    () => Object.values(wasteInputs).reduce((s, v) => s + v, 0),
+    [wasteInputs],
+  );
 
   return (
     <div>
       {/* ══ Page Header (above stats, matches prototype) ══ */}
       <div className="ph">
         <div>
-          <div className="pt">Waste Collection Logs</div>
+          <div className="pt">Record Waste</div>
           <div className="ps">
             {summary.totalEntries || 0} record{summary.totalEntries === 1 ? '' : 's'}
             {pendingCount > 0 && (
@@ -391,12 +420,15 @@ export default function WasteLogsPage() {
                             setForm({
                               date: log.date ? new Date(log.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
                               siteId: log.siteId || '',
-                              wasteTypeId: log.wasteTypeId || log.wasteType?.id || '',
-                              quantity: String(log.quantity ?? ''),
-                              pricePerUnit: String(log.pricePerUnit ?? ''),
+                              depotId: '',
                               collectorId: log.collectorId || '',
                               notes: log.notes || '',
                             });
+                            const wInputs: Record<string, number> = {};
+                            if (log.wasteTypeId) {
+                              wInputs[log.wasteTypeId] = Number(log.quantity) || 0;
+                            }
+                            setWasteInputs(wInputs);
                             setShowModal(true);
                           }}>
                             <Edit2 size={13} />
@@ -418,7 +450,7 @@ export default function WasteLogsPage() {
       {/* ══ ADD MODAL ══ */}
       {showModal && (
         <div className="modal-ov open">
-          <div className="modal" style={{ width: 560 }}>
+          <div className="modal" style={{ width: 720 }}>
             <div className="mh">
               <span className="mt">Record Waste Collection</span>
               <button onClick={() => setShowModal(false)} className="mc"><X size={15} /></button>
@@ -436,6 +468,14 @@ export default function WasteLogsPage() {
                     ))}
                   </select>
                 </Field>
+                <Field label="Depot">
+                  <select className="fc" value={form.depotId} onChange={(e) => setForm({ ...form, depotId: e.target.value })}>
+                    <option value="">Select depot</option>
+                    {sites.filter((s: any) => s.type === 'DEPOT' || s.type === 'BUYBACK_CENTRE').map((s: any) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </Field>
                 <Field label="Collector">
                   <select className="fc" value={form.collectorId} onChange={(e) => setForm({ ...form, collectorId: e.target.value })}>
                     <option value="">Select collector</option>
@@ -444,38 +484,46 @@ export default function WasteLogsPage() {
                     ))}
                   </select>
                 </Field>
-                <Field label="Waste Type" required>
-                  <select className="fc" value={form.wasteTypeId} onChange={(e) => onWasteTypeChange(e.target.value)}>
-                    <option value="">Select waste type</option>
-                    {wasteTypeList.map((w: any) => (
-                      <option key={w.id} value={w.id}>{w.name}</option>
+                <div className="full" style={{ background: 'var(--color-surface3)', borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', marginBottom: 12 }}>
+                    Waste Streams (kg per category)
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                    {wasteTypeList.map((cat: any) => (
+                      <div key={cat.id}>
+                        <label className="fl" style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+                          <span style={{ width: 9, height: 9, borderRadius: 2, background: cat.colour || '#146484' }} />
+                          {cat.name}
+                        </label>
+                        <input
+                          className="fc"
+                          type="number"
+                          min="0"
+                          value={wasteInputs[cat.id] || ''}
+                          onChange={(e) => setWasteInputs({ ...wasteInputs, [cat.id]: parseFloat(e.target.value) || 0 })}
+                        />
+                      </div>
                     ))}
-                  </select>
-                </Field>
-                <Field label="Quantity (kg)" required>
-                  <input className="fc" type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} placeholder="0" />
-                </Field>
-                <Field label="Price / kg (R)">
-                  <input className="fc" type="number" step="0.01" value={form.pricePerUnit} onChange={(e) => setForm({ ...form, pricePerUnit: e.target.value })} placeholder="0.00" />
-                </Field>
+                  </div>
+                  <div style={{ marginTop: 12, padding: 10, background: 'var(--color-w2w-light)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600, fontSize: 12 }}>Total Weight:</span>
+                    <span style={{ fontWeight: 800, fontSize: 16, color: 'var(--color-w2w)' }}>
+                      {(totalInputKg / 1000).toFixed(1)} t
+                    </span>
+                  </div>
+                </div>
+
                 <div className="full">
-                  <Field label="Notes">
-                    <textarea className="fc" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional notes..." />
+                  <Field label="Notes / Reference No.">
+                    <input className="fc" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Delivery note ref, vehicle reg, etc." />
                   </Field>
                 </div>
               </div>
-              {form.quantity && form.pricePerUnit && (
-                <div className="alert alert-green" style={{ marginTop: 4 }}>
-                  <span>
-                    Estimated value: <b>{fmtZAR((parseFloat(form.quantity) || 0) * (parseFloat(form.pricePerUnit) || 0))}</b>
-                  </span>
-                </div>
-              )}
             </div>
             <div className="mf">
               <button onClick={() => setShowModal(false)} className="btn btn-ghost">Cancel</button>
-              <button onClick={handleSave} disabled={createMut.isPending} className="btn btn-primary">
-                {createMut.isPending ? 'Saving...' : 'Save Entry'}
+              <button onClick={handleSave} disabled={isSubmitting || totalInputKg <= 0} className="btn btn-primary">
+                {isSubmitting ? 'Saving...' : 'Save Record'}
               </button>
             </div>
           </div>

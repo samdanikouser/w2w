@@ -12,28 +12,60 @@ import DepotsPage from './pages/DepotsPage';
 import BeneficiaryPage from './pages/BeneficiaryPage';
 import OnboardingPage from './pages/OnboardingPage';
 import AttendancePage from './pages/AttendancePage';
+import CheckInOutPage from './pages/CheckInOutPage';
 import VehiclesPage from './pages/VehiclesPage';
 import TrainingPage from './pages/TrainingPage';
 import ViolationsPage from './pages/ViolationsPage';
 import PLRegisterPage from './pages/PLRegisterPage';
 import EPRReportsPage from './pages/EPRReportsPage';
 import ReportsPage from './pages/ReportsPage';
+import WasteReportPage from './pages/WasteReportPage';
+import TrainingReportPage from './pages/TrainingReportPage';
+import DemographicsReportPage from './pages/DemographicsReportPage';
+import AttendanceReportPage from './pages/AttendanceReportPage';
+import PLReportPage from './pages/PLReportPage';
 import StockRegisterPage from './pages/StockRegisterPage';
 import StockVariancePage from './pages/StockVariancePage';
 import DepotScannerPage from './pages/DepotScannerPage';
 import AuditLogPage from './pages/AuditLogPage';
-import SettingsPage from './pages/SettingsPage';
+import W2WSettingsPage from './pages/W2WSettingsPage';
 import ProfilePage from './pages/ProfilePage';
+import HelpDocsPage from './pages/HelpDocsPage';
+
+import RegisterOrgPage from './components/login/RegisterOrgPage';
+import { useState, useEffect } from 'react';
 
 function App() {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, user } = useAuthStore();
   const { activePage } = useNavStore();
+  const [showLogin, setShowLogin] = useState(true);
 
   if (!isAuthenticated) {
-    return <LoginPage />;
+    if (showLogin) {
+      return <LoginPage onGoToRegister={() => setShowLogin(false)} />;
+    }
+    return <RegisterOrgPage onGoToLogin={() => setShowLogin(true)} />;
   }
 
   const renderPage = () => {
+    // Pages that don't require module checking
+    const publicPages = ['dashboard', 'profile', 'help-docs'];
+    
+    // Some nested report pages might be under 'reports' module
+    const reportPages = ['waste-report', 'training-report', 'demographics-report', 'attendance-report', 'pl-report'];
+    
+    const isReportPage = reportPages.includes(activePage);
+    const requiredModule = isReportPage ? 'reports' : activePage;
+
+    if (!publicPages.includes(activePage) && !user?.modules?.includes(requiredModule)) {
+      return (
+        <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-dim)' }}>
+          <h2>Access Denied</h2>
+          <p>You do not have permission to view this page. Please contact your administrator.</p>
+        </div>
+      );
+    }
+
     switch (activePage) {
       case 'dashboard': return <DashboardPage />;
       case 'employees': return <EmployeesPage />;
@@ -42,9 +74,15 @@ function App() {
       case 'epr-reports': return <EPRReportsPage />;
       case 'pl-register': return <PLRegisterPage />;
       case 'reports': return <ReportsPage />;
+      case 'waste-report': return <WasteReportPage />;
+      case 'training-report': return <TrainingReportPage />;
+      case 'demographics-report': return <DemographicsReportPage />;
+      case 'attendance-report': return <AttendanceReportPage />;
+      case 'pl-report': return <PLReportPage />;
       case 'demographics': return <DemographicsPage />;
       case 'onboarding': return <OnboardingPage />;
       case 'attendance': return <AttendancePage />;
+      case 'check-in-out': return <CheckInOutPage />;
       case 'beneficiary': return <BeneficiaryPage />;
       case 'stock-register': return <StockRegisterPage />;
       case 'stock-variance': return <StockVariancePage />;
@@ -54,8 +92,9 @@ function App() {
       case 'training': return <TrainingPage />;
       case 'violations': return <ViolationsPage />;
       case 'audit-log': return <AuditLogPage />;
-      case 'settings': return <SettingsPage />;
+      case 'w2w-settings': return <W2WSettingsPage />;
       case 'profile': return <ProfilePage />;
+      case 'help-docs': return <HelpDocsPage />;
       default: return <DashboardPage />;
     }
   };

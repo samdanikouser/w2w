@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, authorize, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
@@ -22,16 +22,57 @@ const employeeSchema = z.object({
   bankName: z.string().default(''),
   bankAccount: z.string().default(''),
   bankBranch: z.string().default(''),
+  // Personal extended
+  dateOfBirth: z.string().nullish(),
+  gender: z.string().nullish(),
+  race: z.string().nullish(),
+  nationality: z.string().default('South African'),
+  disability: z.string().default('None'),
+  bloodGroup: z.string().nullish(),
+  // EPWP
+  epwpRefNo: z.string().nullish(),
+  epwpEnrolmentDate: z.string().nullish(),
+  epwpYouth: z.boolean().default(false),
+  // Remuneration
+  stipend: z.number().default(0),
+  serviceFee: z.number().default(0),
+  attendancePct: z.number().default(0),
+  // Exit
+  exitDate: z.string().nullish(),
+  exitReason: z.string().nullish(),
+  // Income Uplift
+  incomeBeforeW2W: z.number().default(0),
+  // Contact
+  currentAddress: z.string().nullish(),
+  permanentAddress: z.string().nullish(),
+  // Emergency Contact
+  emergencyName: z.string().nullish(),
+  emergencyRelationship: z.string().nullish(),
+  emergencyPhone: z.string().nullish(),
+  // System Access
+  customRoleId: z.string().nullish(),
+  loginPassword: z.string().nullish(),
+  // Onboarding
+  onboardStatus: z.string().default('Pending'),
+  uniformIssued: z.boolean().default(false),
+  ppeIssued: z.boolean().default(false),
+  trainingComplete: z.number().int().default(0),
 });
 
 // ── GET /api/employees ──
-router.get('/', async (req, res, next) => {
+router.get('/', async (req: AuthRequest, res, next) => {
   try {
     const { search, status, siteId, page = '1', limit = '50' } = req.query;
 
     const where: any = {};
     if (status && status !== 'all') where.status = status;
-    if (siteId) where.siteId = siteId;
+
+    // Enforce Depot-level sandboxing
+    if (req.userSiteId) {
+      where.siteId = req.userSiteId;
+    } else if (siteId) {
+      where.siteId = siteId;
+    }
     if (search) {
       where.OR = [
         { firstName: { contains: search as string, mode: 'insensitive' } },
@@ -74,9 +115,9 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // ── POST /api/employees ──
-router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('employees'), async (req: AuthRequest, res, next) => {
   try {
-    const data = employeeSchema.parse(req.body);
+    const { customRoleId, loginPassword, ...data } = employeeSchema.parse(req.body);
 
     const employee = await prisma.employee.create({
       data: {
@@ -87,6 +128,21 @@ router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest
       },
       include: { site: { select: { id: true, name: true } } },
     });
+
+    if (customRoleId && loginPassword && data.email) {
+      const bcrypt = await import('bcryptjs');
+      const passwordHash = await bcrypt.default.hash(loginPassword, 12);
+      await prisma.user.create({
+        data: {
+          name: `${data.firstName} ${data.lastName}`,
+          email: data.email.toLowerCase(),
+          passwordHash,
+          siteId: data.siteId || null,
+          customRoleId,
+          isActive: true,
+        }
+      });
+    }
 
     await prisma.auditLog.create({
       data: {
@@ -105,9 +161,9 @@ router.post('/', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest
 });
 
 // ── PUT /api/employees/:id ──
-router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('employees'), async (req: AuthRequest, res, next) => {
   try {
-    const data = employeeSchema.partial().parse(req.body);
+    const { customRoleId, loginPassword, ...data } = employeeSchema.partial().parse(req.body);
 
     const employee = await prisma.employee.update({
       where: { id: req.params.id as string },
@@ -119,6 +175,33 @@ router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthReque
       },
       include: { site: { select: { id: true, name: true } } },
     });
+
+    if (customRoleId && loginPassword && data.email) {
+      const bcrypt = await import('bcryptjs');
+      const passwordHash = await bcrypt.default.hash(loginPassword, 12);
+      
+      const existingUser = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() } });
+      if (existingUser) {
+        await prisma.user.update({
+          where: { email: data.email.toLowerCase() },
+          data: {
+            customRoleId,
+            passwordHash
+          }
+        });
+      } else {
+        await prisma.user.create({
+          data: {
+            name: `${employee.firstName} ${employee.lastName}`,
+            email: data.email.toLowerCase(),
+            passwordHash,
+            siteId: employee.siteId || null,
+            customRoleId,
+            isActive: true,
+          }
+        });
+      }
+    }
 
     await prisma.auditLog.create({
       data: {
@@ -137,7 +220,7 @@ router.put('/:id', authorize('SUPER_ADMIN', 'SITE_ADMIN'), async (req: AuthReque
 });
 
 // ── DELETE /api/employees/:id ──
-router.delete('/:id', authorize('SUPER_ADMIN'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('employees'), async (req: AuthRequest, res, next) => {
   try {
     const employee = await prisma.employee.delete({ where: { id: req.params.id as string } });
 

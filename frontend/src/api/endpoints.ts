@@ -15,6 +15,7 @@ export interface RegisterPayload {
   name: string;
   role?: string;
   siteId?: string;
+  orgName?: string;
 }
 
 export interface AuthResponse {
@@ -26,14 +27,19 @@ export interface AuthResponse {
     role: string;
     siteId: string | null;
     siteName: string | null;
+    modules: string[];
+    roleName: string | null;
   };
 }
 
 export const authApi = {
   login: (data: LoginPayload) => api.post<AuthResponse>('/auth/login', data).then((r) => r.data),
+  register: (data: RegisterPayload) => api.post<AuthResponse>('/auth/register', data).then((r) => r.data),
   me: () => api.get<AuthResponse['user']>('/auth/me').then((r) => r.data),
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post('/auth/change-password', { currentPassword, newPassword }).then((r) => r.data),
+  forgotPassword: (email: string) =>
+    api.post<{ message: string; tempPassword?: string }>('/auth/forgot-password', { email }).then((r) => r.data),
 };
 
 // ═══════════════════════════════════════════════
@@ -56,6 +62,41 @@ export interface EmployeePayload {
   bankName?: string;
   bankAccount?: string;
   bankBranch?: string;
+  // Personal extended
+  dateOfBirth?: string;
+  gender?: string;
+  race?: string;
+  nationality?: string;
+  disability?: string;
+  bloodGroup?: string;
+  // EPWP Enrolment
+  epwpRefNo?: string;
+  epwpEnrolmentDate?: string;
+  epwpYouth?: boolean;
+  // Remuneration
+  stipend?: number;
+  serviceFee?: number;
+  attendancePct?: number;
+  // Exit
+  exitDate?: string;
+  exitReason?: string;
+  // Income Uplift
+  incomeBeforeW2W?: number;
+  // Contact
+  currentAddress?: string;
+  permanentAddress?: string;
+  // Emergency Contact
+  emergencyName?: string;
+  emergencyRelationship?: string;
+  emergencyPhone?: string;
+  // System Access
+  customRoleId?: string;
+  loginPassword?: string;
+  // Onboarding
+  onboardStatus?: string;
+  uniformIssued?: boolean;
+  ppeIssued?: boolean;
+  trainingComplete?: number;
 }
 
 export interface EmployeeListResponse {
@@ -122,6 +163,20 @@ export interface SitePayload {
   lat?: number | null;
   lng?: number | null;
   status?: string;
+  ward?: string;
+  gps?: string;
+  supervisor?: string;
+  beneficiaries?: number;
+  ohsRating?: number;
+  monthlyTonnage?: number;
+  phase?: string;
+  focus?: string;
+  cleanliness?: string;
+  launched?: string;
+  notes?: string;
+  provinceId?: string;
+  municipalityId?: string;
+  subRegionId?: string;
 }
 
 export const sitesApi = {
@@ -140,6 +195,8 @@ export interface WasteTypePayload {
   category?: string;
   unit?: string;
   pricePerUnit?: number;
+  pricePerKg?: number;
+  buyer?: string;
   colour?: string;
   isActive?: boolean;
 }
@@ -160,7 +217,9 @@ export interface VehiclePayload {
   model?: string;
   year?: number | null;
   siteId?: string | null;
-  status?: 'OPERATIONAL' | 'MAINTENANCE' | 'DECOMMISSIONED';
+  status?: 'OPERATIONAL' | 'ACTIVE' | 'MAINTENANCE' | 'UNDER_REPAIR' | 'DECOMMISSIONED' | 'INACTIVE';
+  condition?: string;
+  assignedTo?: string;
   fuelType?: string;
   lastService?: string | null;
   nextService?: string | null;
@@ -179,6 +238,7 @@ export const vehiclesApi = {
 export interface TrainingModulePayload {
   name: string;
   description?: string;
+  type?: string;
   durationHrs?: number;
   isActive?: boolean;
 }
@@ -315,6 +375,7 @@ export interface CustomRolePayload {
   description?: string;
   systemRole: SystemRole;
   isActive?: boolean;
+  modules?: string[];
 }
 export const rolesApi = {
   list: () => api.get<any[]>('/roles').then((r) => r.data),
@@ -343,4 +404,46 @@ export const usersApi = {
   create: (data: CreateUserPayload) => api.post('/users', data).then((r) => r.data),
   update: (id: string, data: UpdateUserPayload) => api.put(`/users/${id}`, data).then((r) => r.data),
   delete: (id: string) => api.delete(`/users/${id}`).then((r) => r.data),
+};
+
+// ═══════════════════════════════════════════════
+//  Notifications API
+// ═══════════════════════════════════════════════
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: 'INFO' | 'WARNING' | 'SUCCESS' | 'ERROR';
+  icon: string;
+  title: string;
+  message: string;
+  action: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
+export const notificationsApi = {
+  list: (params?: { unreadOnly?: boolean; limit?: number }) =>
+    api.get<Notification[]>('/notifications', { params }).then((r) => r.data),
+  unreadCount: () =>
+    api.get<{ count: number }>('/notifications/unread-count').then((r) => r.data),
+  markAsRead: (id: string) =>
+    api.patch(`/notifications/${id}/read`).then((r) => r.data),
+  markAllAsRead: () =>
+    api.patch('/notifications/read-all').then((r) => r.data),
+  dismiss: (id: string) =>
+    api.delete(`/notifications/${id}`).then((r) => r.data),
+  clearRead: () =>
+    api.delete('/notifications').then((r) => r.data),
+};
+
+// ═══════════════════════════════════════════════
+//  POPIA Deletion Requests API
+// ═══════════════════════════════════════════════
+export const deletionRequestsApi = {
+  list: () => api.get<any[]>('/deletion-requests').then((r) => r.data),
+  create: (data: { reason: string; scope: string }) =>
+    api.post('/deletion-requests', data).then((r) => r.data),
+  updateStatus: (id: string, data: { status: string; notes?: string }) =>
+    api.patch(`/deletion-requests/${id}/status`, data).then((r) => r.data),
 };

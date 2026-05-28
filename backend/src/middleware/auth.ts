@@ -3,7 +3,8 @@ import jwt from 'jsonwebtoken';
 
 export interface AuthRequest extends Request {
   userId?: string;
-  userRole?: string;
+  userModules?: string[];
+  userSiteId?: string | null;
 }
 
 /**
@@ -35,19 +36,26 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
   try {
     const payload = jwt.verify(token, JWT_SECRET) as {
       userId: string;
-      role: string;
+      modules: string[];
+      siteId: string | null;
     };
     req.userId = payload.userId;
-    req.userRole = payload.role;
+    req.userModules = payload.modules || [];
+    req.userSiteId = payload.siteId || null;
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 }
 
-export function authorize(...roles: string[]) {
+export function requireModule(...modules: string[]) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.userRole || !roles.includes(req.userRole)) {
+    if (!req.userModules) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    // Allow access if the user has ANY of the required modules
+    const hasAccess = modules.some(m => req.userModules!.includes(m));
+    if (!hasAccess) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
     next();

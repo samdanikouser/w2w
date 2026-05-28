@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { employeesApi, wasteLogsApi, sitesApi, wasteTypesApi } from '../../api/endpoints';
+import { employeesApi, wasteLogsApi, sitesApi, wasteTypesApi, transactionsApi } from '../../api/endpoints';
 
 const TABS = [
   { id: 'performance', label: '👷 Employee Performance' },
@@ -406,6 +406,16 @@ function FinancialTab({
   totalValue: number;
   totalKg: number;
 }) {
+  // Fetch P&L transaction data
+  const { data: txData } = useQuery({
+    queryKey: ['transactions', 'all'],
+    queryFn: () => transactionsApi.list(),
+  });
+
+  const totalRevenue = txData?.summary?.totalRevenue || totalValue;
+  const totalExpense = txData?.summary?.totalExpense || 0;
+  const netSurplus = totalRevenue - totalExpense;
+
   const perSite = useMemo(() => {
     const map = new Map<string, { siteId: string; siteName: string; rev: number; kg: number; count: number }>();
     logs.forEach((l: any) => {
@@ -421,14 +431,19 @@ function FinancialTab({
   }, [logs, sites]);
 
   const maxRev = perSite[0]?.rev || 1;
-  const avgPerKg = totalKg > 0 ? totalValue / totalKg : 0;
 
   return (
     <>
       <div className="g3 mb20">
-        <StatCard label="Gross Revenue" value={fmtZAR(totalValue)} sub={`From ${logs.length} deliveries`} color="var(--color-green)" icon="💰" rail="sc-green" />
-        <StatCard label="Avg. R / kg" value={fmtZAR(avgPerKg)} sub="Across all categories" color="var(--color-w2w)" icon="⚖" rail="sc-blue" />
-        <StatCard label="Revenue Sites" value={String(perSite.length)} sub="With recorded sales" color="var(--color-purple)" icon="🏢" rail="sc-purple" />
+        <StatCard label="Total Programme Revenue" value={fmtZAR(totalRevenue)} sub="All income sources" icon="📈" rail="sc-green" />
+        <StatCard label="Total Expenditure" value={fmtZAR(totalExpense)} sub="All cost categories" icon="📉" rail="sc-red" />
+        <StatCard
+          label="Net Surplus / Deficit"
+          value={fmtZAR(Math.abs(netSurplus))}
+          sub={netSurplus >= 0 ? 'Surplus ▲' : 'Deficit ▼'}
+          icon={netSurplus >= 0 ? '✅' : '⚠️'}
+          rail={netSurplus >= 0 ? 'sc-green' : 'sc-red'}
+        />
       </div>
 
       <div className="card">
@@ -565,49 +580,143 @@ function TonsTab({
 //  BUDGET TAB
 // ═══════════════════════════════════════════════════
 function BudgetTab({ totalValue }: { totalValue: number }) {
-  // Until P&L data is wired, show a simple summary derived from revenue.
-  // Treat operational expense as a stylised 60% of revenue for visualisation only.
-  const operatingBudget = Math.max(0, Math.round(totalValue * 0.6));
-  const utilisationPct = totalValue > 0 ? Math.min(100, Math.round((operatingBudget / totalValue) * 100)) : 0;
+  // Fetch P&L transaction data
+  const { data: txData } = useQuery({
+    queryKey: ['transactions', 'all'],
+    queryFn: () => transactionsApi.list(),
+  });
+
+  // Load cost centers from localStorage settings
+  const costCenters = useMemo(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('w2w_programme_settings') || '{}');
+      return saved.costCenters || [];
+    } catch { return []; }
+  }, []);
+
+  const transactions: any[] = txData?.data || [];
+  const totalExpense = txData?.summary?.totalExpense || 0;
+  const totalBudget = costCenters.reduce((s: number, c: any) => s + (c.budget || 0), 0);
+  const budgetUsedPct = totalBudget > 0 ? Math.min(100, Math.round((totalExpense / totalBudget) * 100)) : 0;
+
+  // Monthly burn rate
+  const expenseMonths = [...new Set(
+    transactions
+      .filter((t: any) => t.type === 'EXPENSE' && t.date)
+      .map((t: any) => t.date?.slice(0, 7))
+      .filter(Boolean)
+  )].length || 1;
+  const monthlyBurn = Math.round(totalExpense / expenseMonths);
+
+  // Per cost center breakdown
+  const expensesByCenter = costCenters.map((cc: any) => {
+    const ccExpenses = transactions.filter((t: any) =>
+      t.type === 'EXPENSE' && (
+        (t.category && t.category.toLowerCase().includes((cc.name || '').toLowerCase().split(' ')[0])) ||
+        (t.description && t.description.toLowerCase().includes((cc.name || '').toLowerCase()))
+      )
+    );
+    const spent = ccExpenses.reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+    const budget = cc.budget || 0;
+    const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0;
+    const statusColor = pct > 90 ? 'var(--color-red)' : pct > 70 ? 'var(--color-amber)' : 'var(--color-green)';
+    return { cc, spent, budget, pct, statusColor };
+  });
 
   return (
-    <div className="card">
-      <div className="ch">
-        <div className="ct">Budget Utilisation</div>
-        <div className="cs">P&L register data is not yet captured — placeholder estimate shown</div>
+    <>
+      <div className="g2 mb20">
+        <StatCard label="Total Budget Allocated" value={fmtZAR(totalBudget)} sub={`${costCenters.length} cost centers`} icon="📋" rail="sc-blue" />
+        <StatCard label="Total Expenditure" value={fmtZAR(totalExpense)} sub="Across all categories" icon="💸" rail="sc-red" />
+        <StatCard
+          label="Budget Utilisation"
+          value={budgetUsedPct + '%'}
+          sub={totalBudget > 0 ? (budgetUsedPct > 80 ? '⚠ High utilisation' : budgetUsedPct > 50 ? 'On track' : 'Under budget') : 'Set budgets in Settings → Cost Centers'}
+          icon="📊"
+          rail={budgetUsedPct > 80 ? 'sc-red' : budgetUsedPct > 50 ? 'sc-amber' : 'sc-green'}
+        />
+        <StatCard label="Monthly Burn Rate" value={fmtZAR(monthlyBurn)} sub={`Average per month · ${expenseMonths} month${expenseMonths !== 1 ? 's' : ''}`} icon="🔥" rail="sc-amber" />
       </div>
-      <div className="cb">
-        <div className="alert alert-amber">
-          <span>
-            Connect cost-centre budgets from the <b>P&amp;L Entry Register</b> to see real budget vs spend. The numbers
-            below are a stylised illustration only.
-          </span>
+
+      <div className="card">
+        <div className="ch">
+          <div className="ct">Budget Utilisation by Cost Center</div>
+          {totalBudget === 0 && <span className="badge ba" style={{ fontSize: 10 }}>Set budgets in Settings → Cost Centers</span>}
         </div>
-        <div className="g3 mt14">
-          <div className="stat-card sc-blue">
-            <div className="stat-label">Revenue (selected period)</div>
-            <div className="stat-val" style={{ color: 'var(--color-w2w)' }}>{fmtZAR(totalValue)}</div>
-            <div className="stat-sub">From waste-log totals</div>
-          </div>
-          <div className="stat-card sc-amber">
-            <div className="stat-label">Illustrative Operating Spend</div>
-            <div className="stat-val" style={{ color: 'var(--color-amber)' }}>{fmtZAR(operatingBudget)}</div>
-            <div className="stat-sub">≈ 60% of revenue (placeholder)</div>
-          </div>
-          <div className="stat-card sc-green">
-            <div className="stat-label">Utilisation</div>
-            <div className="stat-val" style={{ color: 'var(--color-green)' }}>{utilisationPct}%</div>
-            <div className="stat-sub">Of revenue consumed</div>
-          </div>
+        <div className="cb">
+          {expensesByCenter.length === 0 ? (
+            <div style={{ textAlign: 'center', color: 'var(--color-text3)', padding: 32 }}>
+              No cost centers configured. Add them in Settings → Cost Centers.
+            </div>
+          ) : (
+            <>
+              {expensesByCenter.map((d: any) => (
+                <div key={d.cc.id || d.cc.code} style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div>
+                      <span style={{ fontSize: 12, fontWeight: 700 }}>{d.cc.name}</span>
+                      <span style={{ fontSize: 10, color: 'var(--color-text3)', marginLeft: 6, fontFamily: 'var(--mono, monospace)' }}>{d.cc.code}</span>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: d.statusColor }}>{d.pct}%</span>
+                      <span style={{ fontSize: 10, color: 'var(--color-text3)', marginLeft: 6 }}>R{d.spent.toLocaleString()} of R{d.budget.toLocaleString()}</span>
+                    </div>
+                  </div>
+                  <div style={{ height: 12, background: 'var(--color-surface3)', borderRadius: 6, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: d.pct + '%', background: d.statusColor, borderRadius: 6, transition: 'width 0.4s' }} />
+                  </div>
+                  {d.pct > 90 && <div style={{ fontSize: 10, color: 'var(--color-red)', marginTop: 3 }}>⚠ Budget nearly exhausted</div>}
+                  {d.pct > 80 && d.pct <= 90 && <div style={{ fontSize: 10, color: 'var(--color-amber)', marginTop: 3 }}>⚠ Approaching limit</div>}
+                </div>
+              ))}
+
+              {/* Total footer */}
+              <div style={{ marginTop: 16, paddingTop: 12, borderTop: '2px solid var(--color-w2w-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>Total Expenditure vs Budget</div>
+                  <div style={{ fontSize: 10, color: 'var(--color-text3)' }}>Across all cost centers</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: budgetUsedPct > 80 ? 'var(--color-red)' : 'var(--color-w2w)' }}>{budgetUsedPct}%</div>
+                  <div style={{ fontSize: 10, color: 'var(--color-text3)' }}>R{totalExpense.toLocaleString()} / R{totalBudget.toLocaleString()}</div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
+
 
 // ═══════════════════════════════════════════════════
 //  IMPACT METRICS TAB
 // ═══════════════════════════════════════════════════
+
+interface ImpactCardProps {
+  label: string;
+  value: string;
+  sub: string;
+  detail: string;
+  color: string;
+  icon: string;
+}
+
+function ImpactCard({ label, value, sub, detail, color, icon }: ImpactCardProps) {
+  return (
+    <div className="stat-card sc-blue" style={{ borderLeft: `4px solid ${color}`, padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+        <div className="stat-label" style={{ fontSize: 11 }}>{label}</div>
+        <span style={{ fontSize: 20 }}>{icon}</span>
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 800, color, marginBottom: 4 }}>{value}</div>
+      <div style={{ fontSize: 11, color: 'var(--color-text3)' }}>{sub}</div>
+      <div style={{ fontSize: 10, color: 'var(--color-text3)', marginTop: 5, paddingTop: 5, borderTop: '1px solid var(--color-border)' }}>{detail}</div>
+    </div>
+  );
+}
+
 function ImpactTab({
   totalKg,
   totalValue,
@@ -619,73 +728,267 @@ function ImpactTab({
   deliveries: number;
   collectors: number;
 }) {
-  // Standard sustainability coefficients (industry averages)
-  const co2Saved = totalKg * 1.8; // kg CO2 saved per kg recycled (mixed)
-  const treesEquivalent = co2Saved / 21; // 21 kg CO2 / tree / year
-  const waterSavedL = totalKg * 30; // litres water saved per kg
-  const landfillM3 = totalKg * 0.003; // m³ landfill diverted
+  // Fetch P&L transaction data
+  const { data: txData } = useQuery({
+    queryKey: ['transactions', 'all'],
+    queryFn: () => transactionsApi.list(),
+  });
+
+  // Fetch sites for cooperative viability
+  const { data: sitesData } = useQuery({
+    queryKey: ['sites'],
+    queryFn: () => sitesApi.list(),
+  });
+  const sites: any[] = Array.isArray(sitesData) ? sitesData : sitesData?.data || [];
+
+  // Fetch employees for jobs/income data
+  const { data: empData } = useQuery({
+    queryKey: ['employees', 'all'],
+    queryFn: () => employeesApi.list({}),
+  });
+  const employees: any[] = empData?.data || [];
+
+  // Fetch logs for site revenue
+  const { data: logData } = useQuery({
+    queryKey: ['waste-logs', 'all'],
+    queryFn: () => wasteLogsApi.list({}),
+  });
+  const logs: any[] = logData?.data || [];
+
+  const transactions: any[] = txData?.data || [];
+  const totalRevenue = txData?.summary?.totalRevenue || totalValue;
+  const totalInvestment = txData?.summary?.totalExpense || 0;
+
+  // Jobs = active field workers / collectors (W2W IS the job)
+  const activeEmps = employees.filter((e: any) => (e.status || '').toUpperCase() === 'ACTIVE');
+  const fieldWorkers = activeEmps.filter((e: any) =>
+    (e.role || '').toLowerCase().includes('collect') ||
+    (e.role || '').toLowerCase().includes('field') ||
+    (e.department || '').toLowerCase().includes('field')
+  );
+  const jobsCreated = fieldWorkers.length || collectors;
+
+  // Cost per job
+  const costPerJob = jobsCreated > 0 ? Math.round(totalInvestment / jobsCreated) : 0;
+
+  // Revenue per beneficiary
+  const revPerBen = jobsCreated > 0 ? Math.round(totalRevenue / jobsCreated) : 0;
+
+  // Tonnes
+  const totalTonnes = (totalKg / 1000).toFixed(2);
+
+  // ROI
+  const roi = totalInvestment > 0 ? Math.round(((totalRevenue - totalInvestment) / totalInvestment) * 100) : 0;
+  const roiColor = roi >= 0 ? 'var(--color-green)' : 'var(--color-red)';
+
+  // Income uplift (from employee records if available)
+  const withBothIncomes = activeEmps.filter((e: any) => (e.preIncomeMonthly || 0) > 0 && (e.currentIncome || e.dailyRate * 22 || 0) > 0);
+  const avgPreInc = withBothIncomes.length > 0 ? Math.round(withBothIncomes.reduce((s: number, e: any) => s + (e.preIncomeMonthly || 0), 0) / withBothIncomes.length) : 0;
+  const avgCurInc = withBothIncomes.length > 0 ? Math.round(withBothIncomes.reduce((s: number, e: any) => s + (e.currentIncome || e.dailyRate * 22 || 0), 0) / withBothIncomes.length) : 0;
+  const avgUplift = avgCurInc - avgPreInc;
+  const upliftPct = avgPreInc > 0 ? Math.round((avgUplift / avgPreInc) * 100) : 0;
+
+  // Cost of Sales breakdown
+  const cosCats = ['HR Costs', 'Systems Costs', 'Site Clearing Costs', 'Project Management Fees'];
+  const cosColors = ['#146484', '#7c3aed', '#d97706', '#15803d'];
+  const cosData = cosCats.map((cat) => {
+    const amt = transactions
+      .filter((t: any) => t.type === 'EXPENSE' && t.category && t.category.toLowerCase().includes(cat.toLowerCase().split(' ')[0]))
+      .reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+    return { cat, amt };
+  });
+  const totalCoS = cosData.reduce((s, d) => s + d.amt, 0);
+  const cosCostPerBen = jobsCreated > 0 ? Math.round(totalCoS / jobsCreated) : 0;
+
+  // Cooperatives (matching W2W reference prototype)
+  const COOPERATIVES = [
+    { id: 'COOP-001', name: 'Florida Lake Green Collective', siteId: 'SITE-001', region: 'Region C' },
+    { id: 'COOP-002', name: 'Fleurhof Recyclers Cooperative', siteId: 'SITE-002', region: 'Region C' },
+    { id: 'COOP-003', name: 'Doornkop Waste Enterprise', siteId: 'SITE-003', region: 'Region C' },
+    { id: 'COOP-004', name: 'Zandspruit Community Sorters', siteId: 'SITE-004', region: 'Region C' },
+    { id: 'COOP-005', name: 'Newtown Recycle Cooperative', siteId: 'SITE-005', region: 'Region F' },
+    { id: 'COOP-006', name: 'Marshalltown Waste Pickers Coop', siteId: 'SITE-006', region: 'Region F' },
+    { id: 'COOP-007', name: 'Naledi Community Collective', siteId: 'SITE-007', region: 'Region D' },
+    { id: 'COOP-008', name: 'Jabulani Rail Recyclers', siteId: 'SITE-008', region: 'Region D' },
+    { id: 'COOP-009', name: 'Jabulile Youth Recyclers', siteId: 'SITE-009', region: 'Region G' },
+    { id: 'COOP-010', name: 'Sepona Park Waste Enterprise', siteId: 'SITE-010', region: 'Region G' },
+    { id: 'COOP-011', name: 'Lenasia Recyclers Cooperative', siteId: 'SITE-011', region: 'Region G' },
+    { id: 'COOP-012', name: 'Zodiac School Community Coop', siteId: 'SITE-012', region: 'Region G' },
+    { id: 'COOP-013', name: 'Alice Street Sorters', siteId: 'SITE-013', region: 'Region G' },
+    { id: 'COOP-014', name: 'Pikitup Garden Waste Coop', siteId: 'SITE-014', region: 'Region G' },
+    { id: 'COOP-015', name: 'Freedom Park Waste Collective', siteId: 'SITE-015', region: 'Region G' },
+  ];
+
+  // Map DB site IDs for matching
+  const siteIdMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    sites.forEach((s: any) => { map[s.name?.toLowerCase().split(' ')[0] || ''] = s.id; });
+    return map;
+  }, [sites]);
+
+  // Cooperative viability — match cooperatives to DB sites by name prefix
+  const coopViability = useMemo(() => {
+    return COOPERATIVES.map((co) => {
+      // Try to match cooperative's reference siteId to a real DB site
+      const matchedSite = sites.find((s: any) =>
+        s.id === co.siteId ||
+        (s.name && co.name.toLowerCase().includes(s.name.toLowerCase().split(' ')[0]))
+      );
+      const siteId = matchedSite?.id;
+      const siteLogs = siteId ? logs.filter((l: any) => l.siteId === siteId) : [];
+      const rev = siteLogs.reduce((s: number, l: any) => s + (Number(l.totalValue) || 0), 0);
+      const members = siteId ? employees.filter((e: any) => e.siteId === siteId && (e.status || '').toUpperCase() === 'ACTIVE').length : 0;
+      const name = co.name.length > 30 ? co.name.slice(0, 30) + '…' : co.name;
+      return { name, region: co.region, rev: Math.round(rev), members, logs: siteLogs.length };
+    }).sort((a, b) => b.rev - a.rev);
+  }, [sites, logs, employees]);
 
   return (
-    <>
-      <div className="g4 mb20">
-        <div className="stat-card sc-green">
-          <div className="stat-label">CO₂ Avoided</div>
-          <div className="stat-val" style={{ color: 'var(--color-green)' }}>
-            {(co2Saved / 1000).toFixed(1)}t
-          </div>
-          <div className="stat-sub">{co2Saved.toLocaleString(undefined, { maximumFractionDigits: 0 })} kg total</div>
-        </div>
-        <div className="stat-card sc-blue">
-          <div className="stat-label">Trees Equivalent</div>
-          <div className="stat-val" style={{ color: 'var(--color-w2w)' }}>
-            {Math.round(treesEquivalent).toLocaleString()}
-          </div>
-          <div className="stat-sub">Annual CO₂ uptake</div>
-        </div>
-        <div className="stat-card sc-purple">
-          <div className="stat-label">Water Saved</div>
-          <div className="stat-val" style={{ color: 'var(--color-purple)' }}>
-            {(waterSavedL / 1000).toFixed(0)}kL
-          </div>
-          <div className="stat-sub">From recycling vs virgin</div>
-        </div>
-        <div className="stat-card sc-amber">
-          <div className="stat-label">Landfill Diverted</div>
-          <div className="stat-val" style={{ color: 'var(--color-amber)' }}>
-            {landfillM3.toFixed(2)} m³
-          </div>
-          <div className="stat-sub">Out of municipal stream</div>
-        </div>
+    <div style={{ marginBottom: 20 }}>
+      {/* Explainer banner */}
+      <div className="alert alert-blue" style={{ marginBottom: 16 }}>
+        <span>
+          <b>W2W is the job.</b> Jobs created = total enrolled programme beneficiaries.
+          Cost per job = total programme investment ÷ enrolled beneficiaries.
+          Income uplift = what participants earned as informal pickers <b>before</b> W2W vs their current W2W stipend.
+        </span>
       </div>
 
-      <div className="card">
-        <div className="ch">
-          <div className="ct">Social & Economic Impact</div>
-          <div className="cs">Programme contribution to livelihoods</div>
-        </div>
-        <div className="cb">
-          <div className="g2">
-            <div className="drow">
-              <div className="dlb">Recyclable income generated</div>
-              <div className="dvl" style={{ fontWeight: 700, color: 'var(--color-green)' }}>{fmtZAR(totalValue)}</div>
-            </div>
-            <div className="drow">
-              <div className="dlb">Collectors with income</div>
-              <div className="dvl" style={{ fontWeight: 700 }}>{collectors}</div>
-            </div>
-            <div className="drow">
-              <div className="dlb">Total deliveries</div>
-              <div className="dvl" style={{ fontWeight: 700 }}>{deliveries.toLocaleString()}</div>
-            </div>
-            <div className="drow">
-              <div className="dlb">Avg. per collector</div>
-              <div className="dvl" style={{ fontWeight: 700 }}>
-                {collectors > 0 ? fmtZAR(totalValue / collectors) : 'R 0'}
+      {/* Row 1 — Core KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12 }}>
+        <ImpactCard
+          label="Programme Jobs Created" value={String(jobsCreated)} sub="All enrolled W2W beneficiaries" color="var(--color-green)" icon="🏆"
+          detail="W2W enrolment = formal programme job opportunity"
+        />
+        <ImpactCard
+          label="Cost Per Job Created" value={fmtZAR(costPerJob)} sub="Total investment ÷ beneficiaries" color="#146484" icon="💼"
+          detail={`Total spend: ${fmtZAR(totalInvestment)} across ${jobsCreated} jobs`}
+        />
+        <ImpactCard
+          label="Return on Investment" value={roi + '%'} sub="Revenue vs total programme investment" color={roiColor} icon="📊"
+          detail={`(Revenue − Investment) ÷ Investment · ${fmtZAR(totalRevenue)} revenue · ${fmtZAR(totalInvestment)} invested`}
+        />
+      </div>
+
+      {/* Row 2 — Revenue, Tonnes, Uplift */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+        <ImpactCard
+          label="Revenue Per Beneficiary" value={fmtZAR(revPerBen)} sub="Waste sales revenue ÷ beneficiaries" color="var(--color-green)" icon="💰"
+          detail={`${fmtZAR(totalRevenue)} total revenue · ${jobsCreated} beneficiaries`}
+        />
+        <ImpactCard
+          label="Tonnes Diverted from Landfill" value={totalTonnes + 't'} sub="All EPR waste collected to date" color="#146484" icon="♻"
+          detail={`${deliveries} depot deliveries across all sites`}
+        />
+        <ImpactCard
+          label="Income Uplift Per Participant"
+          value={avgUplift > 0 ? fmtZAR(avgUplift) + '/month' : 'Capture baseline data'}
+          sub="Pre-W2W informal income → W2W stipend"
+          color={avgUplift > 0 ? 'var(--color-green)' : 'var(--color-amber)'}
+          icon="📈"
+          detail={withBothIncomes.length > 0
+            ? `Pre-W2W avg: ${fmtZAR(avgPreInc)} → W2W stipend avg: ${fmtZAR(avgCurInc)} (${upliftPct}% uplift) · ${withBothIncomes.length} tracked`
+            : `Set "Current W2W Stipend" in employee records to unlock this KPI`}
+        />
+      </div>
+
+      {/* Cost of Sales + Site Viability */}
+      <div className="g2" style={{ marginBottom: 16 }}>
+        {/* Cost of Sales */}
+        <div className="card">
+          <div className="ch">
+            <div className="ct">Cost of Sales — Investment Breakdown</div>
+            <div className="cs">What it costs to develop one waste recycler</div>
+          </div>
+          <div className="cb">
+            {cosData.map((d, i) => {
+              const pct = totalCoS > 0 ? Math.round((d.amt / totalCoS) * 100) : 0;
+              return (
+                <div key={d.cat} style={{ marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700 }}>{d.cat}</span>
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: cosColors[i] }}>{fmtZAR(d.amt)}</span>
+                      <span style={{ fontSize: 10, color: 'var(--color-text3)', marginLeft: 6 }}>{pct}%</span>
+                    </div>
+                  </div>
+                  <div style={{ height: 8, background: 'var(--color-surface3)', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: pct + '%', background: cosColors[i], borderRadius: 4 }} />
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ marginTop: 14, paddingTop: 10, borderTop: '2px solid var(--color-w2w-light)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div style={{ background: 'var(--color-surface3)', borderRadius: 8, padding: 10 }}>
+                <div style={{ fontSize: 10, color: 'var(--color-text3)', textTransform: 'uppercase' }}>Total CoS</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#146484' }}>{fmtZAR(totalCoS)}</div>
+              </div>
+              <div style={{ background: 'var(--color-surface3)', borderRadius: 8, padding: 10 }}>
+                <div style={{ fontSize: 10, color: 'var(--color-text3)', textTransform: 'uppercase' }}>CoS / Beneficiary</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#7c3aed' }}>{fmtZAR(cosCostPerBen)}</div>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Cooperative / Site Viability */}
+        <div className="card">
+          <div className="ch">
+            <div className="ct">Cooperative Viability</div>
+            <div className="cs">Waste revenue generated per site — building towards self-sustainability</div>
+          </div>
+          {coopViability.length === 0 ? (
+            <div className="cb" style={{ textAlign: 'center', color: 'var(--color-text3)', padding: 32 }}>
+              No sites configured.
+            </div>
+          ) : (
+            <div className="tw">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Cooperative / Site</th>
+                    <th>Region</th>
+                    <th>Members</th>
+                    <th>Deliveries</th>
+                    <th>Revenue</th>
+                    <th>Viability</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coopViability.slice(0, 10).map((co) => (
+                    <tr key={co.name}>
+                      <td style={{ fontSize: 11, fontWeight: 600 }}>{co.name}</td>
+                      <td><span className="badge bb" style={{ fontSize: 10 }}>{co.region}</span></td>
+                      <td style={{ textAlign: 'center' }}>{co.members}</td>
+                      <td style={{ textAlign: 'center' }}>{co.logs}</td>
+                      <td style={{ fontWeight: 700, color: co.rev > 0 ? 'var(--color-green)' : 'var(--color-text3)' }}>
+                        {co.rev > 0 ? 'R ' + co.rev.toLocaleString() : '—'}
+                      </td>
+                      <td>
+                        {co.rev > 0
+                          ? <span style={{ color: 'var(--color-green)', fontWeight: 700 }}>● Active</span>
+                          : <span style={{ color: 'var(--color-text3)' }}>○ Pending</span>
+                        }
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
-    </>
+
+      {/* Income uplift data completeness */}
+      {withBothIncomes.length < jobsCreated && jobsCreated > 0 && (
+        <div className="alert alert-amber">
+          <span>
+            <b>{jobsCreated - withBothIncomes.length} beneficiaries</b> are missing income uplift data.
+            Open each employee record → Income Uplift Tracking → enter their monthly income <b>before joining W2W</b> and their <b>current W2W stipend</b>.
+            This unlocks the Income Uplift KPI for funders and EPR impact reporting.
+          </span>
+        </div>
+      )}
+    </div>
   );
 }

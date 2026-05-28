@@ -1,6 +1,7 @@
 import { useAuthStore } from '../../stores/authStore';
 import { useNavStore } from '../../stores/navStore';
-import type { Role } from '../../types';
+import { ALL_MODULES } from '../../config/moduleRegistry';
+import type { ModuleDef } from '../../config/moduleRegistry';
 import {
   LayoutDashboard,
   MapPin,
@@ -20,157 +21,61 @@ import {
   RefreshCw,
   Settings,
   ScanLine,
+  LogIn,
   LogOut,
   DollarSign,
   Clock,
 } from 'lucide-react';
 
-interface NavItemDef {
-  id: string;
-  label: string;
-  icon: React.ReactNode;
-  badge?: number;
-  badgeColor?: 'red' | 'amber' | 'accent';
+// Map icon name strings from moduleRegistry to actual React icon elements
+const ICON_MAP: Record<string, React.ReactNode> = {
+  LayoutDashboard: <LayoutDashboard size={14} />,
+  MapPin: <MapPin size={14} />,
+  FileText: <FileText size={14} />,
+  TrendingUp: <TrendingUp size={14} />,
+  BarChart3: <BarChart3 size={14} />,
+  Users: <Users size={14} />,
+  UserPlus: <UserPlus size={14} />,
+  ClipboardCheck: <ClipboardCheck size={14} />,
+  Heart: <Heart size={14} />,
+  Package: <Package size={14} />,
+  Truck: <Truck size={14} />,
+  Home: <Home size={14} />,
+  BookOpen: <BookOpen size={14} />,
+  AlertTriangle: <AlertTriangle size={14} />,
+  CheckSquare: <CheckSquare size={14} />,
+  RefreshCw: <RefreshCw size={14} />,
+  Settings: <Settings size={14} />,
+  ScanLine: <ScanLine size={14} />,
+  DollarSign: <DollarSign size={14} />,
+  Clock: <Clock size={14} />,
+  LogIn: <LogIn size={14} />,
+};
+
+function avatarColor(id: string): string {
+  const palette = ['#146484', '#00c896', '#d97706', '#6d28d9', '#c0392b', '#1a9ec4', '#10b981', '#9b7fe8'];
+  let h = 0;
+  for (let i = 0; i < (id || '').length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return palette[h % palette.length];
 }
 
 interface NavSection {
   sec: string;
-  items: NavItemDef[];
+  items: { id: string; label: string; icon: React.ReactNode }[];
 }
 
-// Icon factory ─ keeps NAV_ITEMS readable
-const I = {
-  dashboard: <LayoutDashboard size={14} />,
-  mapPin: <MapPin size={14} />,
-  fileText: <FileText size={14} />,
-  trending: <TrendingUp size={14} />,
-  barChart: <BarChart3 size={14} />,
-  users: <Users size={14} />,
-  userPlus: <UserPlus size={14} />,
-  clipboard: <ClipboardCheck size={14} />,
-  heart: <Heart size={14} />,
-  package: <Package size={14} />,
-  truck: <Truck size={14} />,
-  home: <Home size={14} />,
-  book: <BookOpen size={14} />,
-  alert: <AlertTriangle size={14} />,
-  check: <CheckSquare size={14} />,
-  refresh: <RefreshCw size={14} />,
-  settings: <Settings size={14} />,
-  scan: <ScanLine size={14} />,
-  dollar: <DollarSign size={14} />,
-  clock: <Clock size={14} />,
-};
-
-// ─── NAV_ITEMS ─ Ported from prototype W2W_Platform_v10.html ~L1574 ───
-// React role names → prototype role groups:
-//   super_admin → it / chairman / ceo (full access)
-//   site_admin  → supervisor (own site only)
-//   data_clerk  → admin (data capture, no financial)
-//   field_worker→ field (FO mobile — handled elsewhere)
-const NAV_BY_ROLE: Record<Role, NavSection[]> = {
-  super_admin: [
-    { sec: 'Programme', items: [
-      { id: 'dashboard', label: 'Dashboard', icon: I.dashboard },
-      { id: 'sites', label: 'Sites & Regions', icon: I.mapPin },
-      { id: 'epr-reports', label: 'EPR Monthly Reports', icon: I.barChart },
-    ]},
-    { sec: 'Finance', items: [
-      { id: 'pl-register', label: 'P&L Entry Register', icon: I.dollar },
-      { id: 'reports', label: 'Reports & Export', icon: I.trending },
-      { id: 'demographics', label: 'Demographics', icon: I.users },
-    ]},
-    { sec: 'People', items: [
-      { id: 'employees', label: 'Employees', icon: I.users },
-      { id: 'onboarding', label: 'Onboarding', icon: I.userPlus },
-      { id: 'attendance', label: 'Attendance Report', icon: I.clock },
-      { id: 'beneficiary', label: 'Beneficiary Tracker', icon: I.heart },
-    ]},
-    { sec: 'Inventory', items: [
-      { id: 'stock-register', label: 'Stock Register', icon: I.package },
-    ]},
-    { sec: 'Assets', items: [
-      { id: 'vehicles', label: 'Vehicles & Fleet', icon: I.truck },
-      { id: 'depots', label: 'Depot Management', icon: I.home },
-    ]},
-    { sec: 'Training', items: [
-      { id: 'training', label: 'Training Tracker', icon: I.book },
-    ]},
-    { sec: 'Compliance', items: [
-      { id: 'violations', label: 'Warnings', icon: I.alert },
-      { id: 'audit-log', label: 'Audit Log', icon: I.check },
-    ]},
-    { sec: 'Waste Ops', items: [
-      { id: 'waste-logs', label: 'Waste Collection', icon: I.refresh },
-    ]},
-    { sec: 'System', items: [
-      { id: 'settings', label: 'Settings', icon: I.settings },
-    ]},
-  ],
-  site_admin: [
-    { sec: 'My Site', items: [
-      { id: 'dashboard', label: 'Dashboard', icon: I.dashboard },
-      { id: 'employees', label: 'Site Employees', icon: I.users },
-      { id: 'attendance', label: 'Attendance Report', icon: I.clock },
-    ]},
-    { sec: 'Operations', items: [
-      { id: 'waste-logs', label: 'Waste Collection', icon: I.refresh },
-      { id: 'depot-scanner', label: 'Depot Scanner', icon: I.scan },
-      { id: 'stock-variance', label: 'Stock Variance', icon: I.alert },
-      { id: 'vehicles', label: 'Vehicles', icon: I.truck },
-      { id: 'depots', label: 'Depot Management', icon: I.home },
-    ]},
-    { sec: 'Compliance', items: [
-      { id: 'training', label: 'Training', icon: I.book },
-      { id: 'violations', label: 'Warnings', icon: I.alert },
-      { id: 'epr-reports', label: 'EPR Reports', icon: I.barChart },
-    ]},
-  ],
-  data_clerk: [
-    { sec: 'Register', items: [
-      { id: 'dashboard', label: 'Dashboard', icon: I.dashboard },
-      { id: 'employees', label: 'Register Employee', icon: I.users },
-      { id: 'onboarding', label: 'Onboarding Checklist', icon: I.userPlus },
-      { id: 'attendance', label: 'Attendance Report', icon: I.clock },
-    ]},
-    { sec: 'Waste', items: [
-      { id: 'waste-logs', label: 'Record Waste', icon: I.refresh },
-      { id: 'depot-scanner', label: 'Depot Scanner', icon: I.scan },
-      { id: 'stock-variance', label: 'Stock Variance', icon: I.alert },
-    ]},
-    { sec: 'Assets', items: [
-      { id: 'vehicles', label: 'Vehicles & Fleet', icon: I.truck },
-      { id: 'stock-register', label: 'Stock Register', icon: I.package },
-      { id: 'depots', label: 'Depot Management', icon: I.home },
-    ]},
-    { sec: 'Programme', items: [
-      { id: 'demographics', label: 'Demographics', icon: I.users },
-      { id: 'training', label: 'Training', icon: I.book },
-      { id: 'violations', label: 'Warnings', icon: I.alert },
-      { id: 'epr-reports', label: 'EPR Reports', icon: I.barChart },
-    ]},
-  ],
-  field_worker: [
-    { sec: 'Field', items: [
-      { id: 'fo-attend', label: 'Attendance', icon: I.clock },
-    ]},
-  ],
-};
-
-// Colors for avatar backgrounds (kept from prior version)
-const AVATAR_COLORS: Record<string, string> = {
-  super_admin: '#146484',
-  site_admin: '#00c896',
-  data_clerk: '#d97706',
-  field_worker: '#6d28d9',
-};
-
-const ROLE_LABELS: Record<Role, string> = {
-  super_admin: 'IT Administrator',
-  site_admin: 'Site Supervisor',
-  data_clerk: 'Administrator',
-  field_worker: 'Field Worker',
-};
+function buildSections(modules: ModuleDef[]): NavSection[] {
+  const map = new Map<string, { id: string; label: string; icon: React.ReactNode }[]>();
+  for (const m of modules) {
+    if (!map.has(m.section)) map.set(m.section, []);
+    map.get(m.section)!.push({
+      id: m.id,
+      label: m.label,
+      icon: ICON_MAP[m.icon] || <LayoutDashboard size={14} />,
+    });
+  }
+  return Array.from(map.entries()).map(([sec, items]) => ({ sec, items }));
+}
 
 export default function Sidebar() {
   const { user, logout } = useAuthStore();
@@ -184,9 +89,24 @@ export default function Sidebar() {
     .join('')
     .toUpperCase();
 
-  const avatarColor = AVATAR_COLORS[user.role] || '#146484';
-  const sections: NavSection[] = NAV_BY_ROLE[user.role] || NAV_BY_ROLE.super_admin;
-  const roleLabel = ROLE_LABELS[user.role] || user.role;
+  const avColor = avatarColor(user.id);
+
+  // Determine allowed modules: if user.modules exists and has items, use it.
+  // Otherwise if role is 'super_admin', show ALL_MODULES.
+  let allowedIds = user.modules && user.modules.length > 0
+    ? user.modules
+    : user.role === 'super_admin'
+      ? ALL_MODULES.map((m) => m.id)
+      : [];
+
+  // Backward compat: map old 'settings' → 'w2w-settings'
+  if (allowedIds.includes('settings') && !allowedIds.includes('w2w-settings')) {
+    allowedIds = allowedIds.map((id) => id === 'settings' ? 'w2w-settings' : id);
+  }
+
+  const filteredModules = ALL_MODULES.filter((m) => allowedIds.includes(m.id));
+  const sections = buildSections(filteredModules);
+  const roleLabel = user.roleName || user.role.replace(/_/g, ' ');
 
   return (
     <aside
@@ -202,72 +122,32 @@ export default function Sidebar() {
       }}
     >
       {/* ── Header / Logo ── */}
-      <div className="sb-header" style={{ padding: 16, borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+      <div className="sb-header" style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
         <div className="sb-logo" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div
-            className="sb-badge"
             style={{
-              width: 36,
-              height: 36,
-              background: 'var(--color-accent)',
+              width: 38,
+              height: 38,
+              background: 'white',
               borderRadius: 10,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0,
+              overflow: 'hidden',
             }}
           >
-            <RefreshCw size={20} color="white" strokeWidth={2.4} />
+            <img src="/elanora-logo.png" alt="Elanora Systems" style={{ width: 32, height: 32, objectFit: 'contain' }} />
           </div>
           <div>
-            <div className="sb-name" style={{ fontSize: 14, fontWeight: 800, color: 'white', letterSpacing: '-0.02em' }}>W2W</div>
-            <div className="sb-tagline" style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-              Waste to Work
+            <div className="sb-name" style={{ fontSize: 13, fontWeight: 800, color: 'white', letterSpacing: '-0.02em' }}>Elanora Systems</div>
+            <div className="sb-tagline" style={{ fontSize: 8.5, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              Waste to Work Platform
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── User card ── */}
-      <div
-        className="sb-user"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '10px 14px',
-          background: 'rgba(255,255,255,0.05)',
-          margin: 8,
-          borderRadius: 9,
-        }}
-      >
-        <div
-          className="sb-uav avt"
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 11,
-            fontWeight: 700,
-            color: 'white',
-            flexShrink: 0,
-            background: avatarColor,
-          }}
-        >
-          {initials}
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div className="sb-uname" style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.8)', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {user.name}
-          </div>
-          <div className="sb-urole" style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)' }}>
-            {roleLabel} • BOH
-          </div>
-        </div>
-      </div>
 
       {/* ── Navigation ── */}
       <nav style={{ flex: 1, paddingTop: 4, paddingBottom: 4 }}>
@@ -327,13 +207,6 @@ export default function Sidebar() {
                 >
                   <span style={{ flexShrink: 0, display: 'flex' }}>{item.icon}</span>
                   <span style={{ flex: 1 }}>{item.label}</span>
-                  {item.badge !== undefined && (
-                    <span
-                      className={`sb-badge-pill${item.badgeColor === 'amber' ? ' amber' : item.badgeColor === 'accent' ? ' accent' : ''}`}
-                    >
-                      {item.badge}
-                    </span>
-                  )}
                 </button>
               );
             })}
@@ -369,12 +242,17 @@ export default function Sidebar() {
             textAlign: 'center',
             marginTop: 6,
             borderTop: '1px solid rgba(255,255,255,0.05)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 4,
           }}
         >
-          <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.45)', lineHeight: 1.7 }}>
-            © 2026 Waste To Work
+          <img src="/elanora-logo.png" alt="Elanora" style={{ width: 18, height: 18, borderRadius: 4, objectFit: 'contain', background: 'white', padding: 1 }} />
+          <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.45)', lineHeight: 1.5 }}>
+            © 2026 Elanora Systems
             <br />
-            Powered by Athina Tech
+            Waste to Work Platform
           </div>
         </div>
       </div>

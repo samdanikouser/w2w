@@ -21,6 +21,8 @@ import violationRoutes from './routes/violations.js';
 import stockItemRoutes from './routes/stockItems.js';
 import roleRoutes from './routes/roles.js';
 import userRoutes from './routes/users.js';
+import notificationRoutes from './routes/notifications.js';
+import deletionRequestRoutes from './routes/deletionRequests.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -69,6 +71,8 @@ app.use('/api/violations', violationRoutes);
 app.use('/api/stock-items', stockItemRoutes);
 app.use('/api/roles', roleRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/deletion-requests', deletionRequestRoutes);
 
 // ── Error handler ──
 app.use(errorHandler);
