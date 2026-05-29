@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { emptyToNull } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
@@ -10,10 +11,10 @@ const attendanceSchema = z.object({
   employeeId: z.string().min(1),
   date: z.string().min(1),
   status: z.enum(['PRESENT', 'ABSENT', 'LATE', 'HALF_DAY', 'LEAVE']).default('PRESENT'),
-  clockIn: z.string().nullish(),
-  clockOut: z.string().nullish(),
+  clockIn: emptyToNull,
+  clockOut: emptyToNull,
   hoursWorked: z.number().nullish(),
-  notes: z.string().nullish(),
+  notes: emptyToNull,
 });
 
 router.get('/', async (req, res, next) => {

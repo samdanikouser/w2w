@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { emptyToNull } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
@@ -12,7 +13,7 @@ const createNotificationSchema = z.object({
   icon: z.string().default('📌'),
   title: z.string().min(1),
   message: z.string().default(''),
-  action: z.string().nullish(),
+  action: emptyToNull,
 });
 
 // ── GET /api/notifications ──

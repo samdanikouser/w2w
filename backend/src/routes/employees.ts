@@ -2,13 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
-
-// Helper: transform empty string to null
-const emptyToNull = z.preprocess((v) => (v === '' ? null : v), z.string().nullish());
-const emptyToNullUuid = z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullish());
 
 const employeeSchema = z.object({
   empNo: z.string().min(1),

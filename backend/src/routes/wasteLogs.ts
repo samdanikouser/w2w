@@ -2,19 +2,20 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
 
 const logSchema = z.object({
   date: z.string(),
-  siteId: z.string().uuid().nullish(),
-  wasteTypeId: z.string().uuid().nullish(),
+  siteId: emptyToNullUuid,
+  wasteTypeId: emptyToNullUuid,
   quantity: z.number().positive(),
   unit: z.string().default('kg'),
   pricePerUnit: z.number().default(0),
-  collectorId: z.string().uuid().nullish(),
-  notes: z.string().nullish(),
+  collectorId: emptyToNullUuid,
+  notes: emptyToNull,
 });
 
 // ── GET /api/waste-logs ──

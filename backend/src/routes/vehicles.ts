@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { emptyToNull } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
@@ -11,13 +12,13 @@ const vehicleSchema = z.object({
   make: z.string().default(''),
   model: z.string().default(''),
   year: z.number().int().nullish(),
-  siteId: z.string().nullish(),
+  siteId: emptyToNull,
   status: z.enum(['OPERATIONAL', 'ACTIVE', 'MAINTENANCE', 'UNDER_REPAIR', 'DECOMMISSIONED', 'INACTIVE']).default('OPERATIONAL'),
   condition: z.string().default('Good'),
   assignedTo: z.string().default(''),
   fuelType: z.string().default(''),
-  lastService: z.string().nullish(),
-  nextService: z.string().nullish(),
+  lastService: emptyToNull,
+  nextService: emptyToNull,
   odometerKm: z.number().nullish(),
 });
 

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { emptyToNull } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
@@ -18,8 +19,8 @@ const enrolmentSchema = z.object({
   employeeId: z.string().min(1),
   trainingModuleId: z.string().min(1),
   status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'COMPLETED', 'EXPIRED']).default('NOT_STARTED'),
-  completedDate: z.string().nullish(),
-  expiryDate: z.string().nullish(),
+  completedDate: emptyToNull,
+  expiryDate: emptyToNull,
   score: z.number().nullish(),
 });
 
