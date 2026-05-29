@@ -78,6 +78,7 @@ export default function AttendancePage() {
   const createMut = useMutation({
     mutationFn: (p: AttendancePayload) => attendanceApi.upsert(p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['attendance'] }); setShowAdd(false); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Failed to save attendance'),
   });
 
   // ── Grid for month view ──

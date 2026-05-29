@@ -8,7 +8,7 @@ const router = Router();
 router.use(authenticate);
 
 const logSchema = z.object({
-  date: z.string(),
+  date: z.string().min(1),
   siteId: emptyToNullUuid,
   wasteTypeId: emptyToNullUuid,
   quantity: z.number().positive(),

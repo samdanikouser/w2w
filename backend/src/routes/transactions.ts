@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
-import { emptyToNull } from '../utils/zodHelpers.js';
+import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
@@ -13,7 +13,7 @@ const txSchema = z.object({
   category: z.string().default(''),
   description: z.string().default(''),
   amount: z.number(),
-  siteId: emptyToNull,
+  siteId: emptyToNullUuid,
   reference: emptyToNull,
 });
 

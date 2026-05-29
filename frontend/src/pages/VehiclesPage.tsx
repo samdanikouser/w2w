@@ -45,10 +45,12 @@ export default function VehiclesPage() {
   const createMut = useMutation({
     mutationFn: (p: VehiclePayload) => vehiclesApi.create(p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['vehicles'] }); setModal(null); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
   const updateMut = useMutation({
     mutationFn: ({ id, p }: { id: string; p: Partial<VehiclePayload> }) => vehiclesApi.update(id, p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['vehicles'] }); setModal(null); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
 
   const avail = allVehicles.filter((v) => v.status === 'OPERATIONAL').length;

@@ -186,6 +186,7 @@ export default function EmployeesPage() {
   const deleteMut = useMutation({
     mutationFn: (id: string) => employeesApi.delete(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['employees'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
 
   // ── Handlers ──

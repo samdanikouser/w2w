@@ -44,14 +44,17 @@ export default function DepotsPage() {
   const createMut = useMutation({
     mutationFn: (p: SitePayload) => sitesApi.create(p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['sites'] }); setModal(null); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
   const updateMut = useMutation({
     mutationFn: ({ id, p }: { id: string; p: Partial<SitePayload> }) => sitesApi.update(id, p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['sites'] }); setModal(null); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
   const deleteMut = useMutation({
     mutationFn: (id: string) => sitesApi.delete(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sites'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
 
   const depots = useMemo(() => {

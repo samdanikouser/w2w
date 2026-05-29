@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
-import { emptyToNull } from '../utils/zodHelpers.js';
+import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
@@ -10,7 +10,7 @@ router.use(authenticate);
 const reportSchema = z.object({
   month: z.number().int().min(1).max(12),
   year: z.number().int(),
-  siteId: emptyToNull,
+  siteId: emptyToNullUuid,
   totalTonnes: z.number().default(0),
   totalRevenue: z.number().default(0),
   status: z.enum(['DRAFT', 'SUBMITTED', 'APPROVED_REPORT', 'REJECTED_REPORT']).default('DRAFT'),

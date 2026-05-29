@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
-import { emptyToNull } from '../utils/zodHelpers.js';
+import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
@@ -14,7 +14,7 @@ const itemSchema = z.object({
   uom: z.string().default('each'),
   onHand: z.number().default(0),
   reorderAt: z.number().default(0),
-  siteId: emptyToNull,
+  siteId: emptyToNullUuid,
 });
 
 function deriveStatus(onHand: number, reorderAt: number): 'OK' | 'LOW' | 'OUT' {

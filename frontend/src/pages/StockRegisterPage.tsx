@@ -65,14 +65,17 @@ export default function StockRegisterPage() {
   const createMut = useMutation({
     mutationFn: (p: StockItemPayload) => stockItemsApi.create(p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['stock-items'] }); setModal(null); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
   const updateMut = useMutation({
     mutationFn: ({ id, p }: { id: string; p: Partial<StockItemPayload> }) => stockItemsApi.update(id, p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['stock-items'] }); setModal(null); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
   const deleteMut = useMutation({
     mutationFn: (id: string) => stockItemsApi.delete(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['stock-items'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
 
   const lowStock = allItems.filter((s) => s.status === 'LOW' || s.status === 'OUT');

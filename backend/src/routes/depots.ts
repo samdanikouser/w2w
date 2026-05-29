@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { emptyToNull } from '../utils/zodHelpers.js';
+import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
@@ -11,7 +11,7 @@ const depotSchema = z.object({
   name: z.string().min(1),
   regionCode: z.string().default('A'),
   physicalAddress: z.string().default(''),
-  managerUserId: emptyToNull,
+  managerUserId: emptyToNullUuid,
   totalFleetCount: z.number().default(0),
   totalCompactorTrucks: z.number().default(0),
   totalSkipLoaderTrucks: z.number().default(0),

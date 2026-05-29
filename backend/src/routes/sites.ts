@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
@@ -28,10 +29,10 @@ const siteSchema = z.object({
   provinceId: z.string().optional().default(''),
   municipalityId: z.string().optional().default(''),
   subRegionId: z.string().optional().default(''),
-  depotId: z.string().optional().nullish(),
+  depotId: emptyToNullUuid,
   currentSkipBinCount: z.number().optional().nullish(),
   gateFee: z.number().optional().nullish(),
-  weighbridge: z.string().optional().nullish(),
+  weighbridge: emptyToNull,
   maxVehicleTonnage: z.number().optional().nullish(),
   acceptedMaterials: z.array(z.string()).optional().default([]),
   metadata: z.any().optional(),
@@ -95,7 +96,7 @@ router.put('/:id', async (req: AuthRequest, res, next) => {
     const data = siteSchema.partial().parse(req.body);
     const site = await prisma.site.update({
       where: { id: req.params.id as string },
-      data: { ...data, lat: data.lat || undefined, lng: data.lng || undefined, type: data.type as any, status: data.status as any } as any,
+      data: { ...data, lat: data.lat || undefined, lng: data.lng || undefined, type: data.type as any, status: data.status as any, depotId: data.depotId !== undefined ? (data.depotId || null) : undefined } as any,
     });
 
     await prisma.auditLog.create({

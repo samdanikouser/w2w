@@ -138,15 +138,18 @@ export default function ViolationsPage() {
   const createMut = useMutation({
     mutationFn: (p: ViolationPayload) => violationsApi.create(p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['violations'] }); setModal(null); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
   const resolveMut = useMutation({
     mutationFn: (id: string) => violationsApi.update(id, { status: 'CLOSED' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['violations'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
   const escalateMut = useMutation({
     mutationFn: ({ id, next }: { id: string; next: string }) =>
       violationsApi.update(id, { severity: next as ViolationPayload['severity'] }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['violations'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
 
   /* ── Handlers ── */

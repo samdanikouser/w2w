@@ -175,6 +175,7 @@ export default function CheckInOutPage() {
       });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['attendance'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
 
   const checkOutMut = useMutation({
@@ -190,6 +191,7 @@ export default function CheckInOutPage() {
       });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['attendance'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
 
   const isBusy = checkInMut.isPending || checkOutMut.isPending;

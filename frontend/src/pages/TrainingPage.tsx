@@ -72,23 +72,28 @@ export default function TrainingPage() {
   const createModMut = useMutation({
     mutationFn: (p: any) => trainingApi.createModule(p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['training', 'modules'] }); setModModal(false); }
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
   const updateModMut = useMutation({
     mutationFn: ({ id, p }: any) => trainingApi.updateModule(id, p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['training', 'modules'] }); setModModal(false); }
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
   const deleteModMut = useMutation({
     mutationFn: (id: string) => trainingApi.deleteModule(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['training', 'modules'] }); }
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['training', 'modules'] }); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
 
   const createRecMut = useMutation({
     mutationFn: (p: TrainingRecordPayload) => trainingApi.createRecord(p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['training', 'records'] }); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
   const updateRecMut = useMutation({
     mutationFn: ({ id, p }: { id: string; p: Partial<TrainingRecordPayload> }) => trainingApi.updateRecord(id, p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['training', 'records'] }); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
 
   /* ── Filtered records ── */

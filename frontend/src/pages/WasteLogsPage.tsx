@@ -117,9 +117,9 @@ export default function WasteLogsPage() {
   const pendingCount = logs.filter((l: any) => l.status === 'PENDING').length;
 
   // ── Mutations ──
-  const approveMut = useMutation({ mutationFn: (id: string) => wasteLogsApi.approve(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['waste-logs'] }) });
-  const rejectMut = useMutation({ mutationFn: (id: string) => wasteLogsApi.reject(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['waste-logs'] }) });
-  const deleteMut = useMutation({ mutationFn: (id: string) => wasteLogsApi.delete(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['waste-logs'] }) });
+  const approveMut = useMutation({ mutationFn: (id: string) => wasteLogsApi.approve(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['waste-logs'] }), onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.') });
+  const rejectMut = useMutation({ mutationFn: (id: string) => wasteLogsApi.reject(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['waste-logs'] }), onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.') });
+  const deleteMut = useMutation({ mutationFn: (id: string) => wasteLogsApi.delete(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['waste-logs'] }), onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.') });
 
   const handleSave = async () => {
     setIsSubmitting(true);

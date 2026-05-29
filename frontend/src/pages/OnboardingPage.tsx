@@ -77,6 +77,7 @@ export default function OnboardingPage() {
     mutationFn: ({ id, payload }: { id: string; payload: Record<string, any> }) =>
       employeesApi.update(id, payload as any),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['employees'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
   });
 
   const handleIssueUniform = (emp: any) => {

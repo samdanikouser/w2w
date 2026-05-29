@@ -121,8 +121,8 @@ router.put('/records/:id', requireModule('training'), async (req: AuthRequest, r
       data: {
         ...data,
         status: data.status as any,
-        completedDate: data.completedDate ? new Date(data.completedDate) : undefined,
-        expiryDate: data.expiryDate ? new Date(data.expiryDate) : undefined,
+        completedDate: data.completedDate !== undefined ? (data.completedDate ? new Date(data.completedDate) : null) : undefined,
+        expiryDate: data.expiryDate !== undefined ? (data.expiryDate ? new Date(data.expiryDate) : null) : undefined,
       },
     });
     res.json(r);

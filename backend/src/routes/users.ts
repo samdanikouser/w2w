@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import prisma from '../config/db.js';
 import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
@@ -20,13 +21,13 @@ const createSchema = z.object({
   employeeId: z.string().uuid(),
   email: z.string().email(),
   password: passwordPolicy,
-  customRoleId: z.string().uuid().optional().nullable(),
+  customRoleId: emptyToNullUuid,
 });
 
 const updateSchema = z.object({
   email: z.string().email().optional(),
   isActive: z.boolean().optional(),
-  customRoleId: z.string().uuid().nullable().optional(),
+  customRoleId: emptyToNullUuid,
   newPassword: passwordPolicy.optional(),
 });
 

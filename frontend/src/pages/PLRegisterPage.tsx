@@ -69,6 +69,7 @@ export default function PLRegisterPage() {
   const deleteMut = useMutation({
     mutationFn: (id: string) => transactionsApi.delete(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['transactions'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
 
   // ── Filtering ──

@@ -521,14 +521,17 @@ function CooperativesSection({ sites, employees, logs, cooperatives }: { sites: 
   const mutCreate = useMutation({
     mutationFn: cooperativesApi.create,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cooperatives'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
   const mutUpdate = useMutation({
     mutationFn: ({ id, payload }: { id: string, payload: any }) => cooperativesApi.update(id, payload),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cooperatives'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
   const mutDelete = useMutation({
     mutationFn: cooperativesApi.delete,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cooperatives'] }),
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
 
   const [coopModal, setCoopModal] = useState<'add' | 'edit' | null>(null);
