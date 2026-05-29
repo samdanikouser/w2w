@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { employeesApi, wasteLogsApi, rolesApi, sitesApi, depotsApi, type EmployeePayload } from '../api/endpoints';
+import { employeesApi, wasteLogsApi, rolesApi, sitesApi, depotsApi, cooperativesApi, type EmployeePayload } from '../api/endpoints';
 import { useNavStore } from '../stores/navStore';
 import { exportCsv } from '../utils/csv';
 import {
@@ -140,6 +140,10 @@ export default function EmployeesPage() {
   const { data: depotsData = [] } = useQuery({
     queryKey: ['depots'],
     queryFn: () => depotsApi.list(),
+  });
+  const { data: coopsData = [] } = useQuery({
+    queryKey: ['cooperatives'],
+    queryFn: () => cooperativesApi.list(),
   });
 
   const allLogs: any[] = wasteLogsData?.data || [];
@@ -571,20 +575,27 @@ export default function EmployeesPage() {
                     {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </FormField>
-                <FormField label="Assigned Depot / Site">
+                <FormField label="Assigned Site / Depot / Cooperative">
                   <select className="fc" value={formData.siteId || ''} onChange={(e) => updateField('siteId', e.target.value || null)}>
-                    <option value="">No Site (Global/HQ)</option>
+                    <option value="">No Assignment (Global/HQ)</option>
+                    {sitesData.length > 0 && (
+                      <optgroup label="🏗 Sites">
+                        {sitesData.map((s: any) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
                     {depotsData.length > 0 && (
-                      <optgroup label="Depots">
+                      <optgroup label="🏭 Depots">
                         {depotsData.map((d: any) => (
                           <option key={d.id} value={d.id}>{d.name}</option>
                         ))}
                       </optgroup>
                     )}
-                    {sitesData.length > 0 && (
-                      <optgroup label="Sites">
-                        {sitesData.map((s: any) => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
+                    {coopsData.length > 0 && (
+                      <optgroup label="🤝 Cooperatives">
+                        {coopsData.map((c: any) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                       </optgroup>
                     )}

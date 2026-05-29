@@ -20,8 +20,8 @@ model User {
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
   auditLogs         AuditLog[]
-  deletion_requests deletion_requests[]
-  notifications     notifications[]
+  deletionRequests  DeletionRequest[]
+  notifications     Notification[]
   customRole        CustomRole?         @relation(fields: [customRoleId], references: [id])
   employee          Employee?           @relation("EmployeeUser", fields: [employeeId], references: [id])
   site              Site?               @relation(fields: [siteId], references: [id])
@@ -337,7 +337,7 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-model deletion_requests {
+model DeletionRequest {
   id          String         @id
   reference   String         @unique
   requestedBy String
@@ -352,9 +352,10 @@ model deletion_requests {
 
   @@index([requestedBy])
   @@index([status])
+  @@map("deletion_requests")
 }
 
-model notifications {
+model Notification {
   id        String           @id
   userId    String
   type      NotificationType @default(INFO)
@@ -368,6 +369,7 @@ model notifications {
 
   @@index([userId, createdAt])
   @@index([userId, read])
+  @@map("notifications")
 }
 
 enum SiteType {

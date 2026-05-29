@@ -21,9 +21,9 @@ router.get('/', async (req: AuthRequest, res, next) => {
   try {
     const isAdmin = req.userModules?.includes('w2w-settings');
 
-    const requests = await (prisma as any).deletionRequest.findMany({
+    const requests = await prisma.deletionRequest.findMany({
       where: isAdmin ? {} : { requestedBy: req.userId! },
-      include: { user: { select: { name: true, email: true } } },
+      include: { users: { select: { name: true, email: true } } },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -39,7 +39,7 @@ router.post('/', async (req: AuthRequest, res, next) => {
     const data = createRequestSchema.parse(req.body);
     const reference = `POPIA-${Date.now().toString(36).toUpperCase()}`;
 
-    const request = await (prisma as any).deletionRequest.create({
+    const request = await prisma.deletionRequest.create({
       data: {
         reference,
         requestedBy: req.userId!,
@@ -69,7 +69,7 @@ router.patch('/:id/status', requireModule('w2w-settings'), async (req: AuthReque
   try {
     const { status, notes } = updateStatusSchema.parse(req.body);
 
-    const existing = await (prisma as any).deletionRequest.findUnique({
+    const existing = await prisma.deletionRequest.findUnique({
       where: { id: req.params.id as string },
     });
 
@@ -77,7 +77,7 @@ router.patch('/:id/status', requireModule('w2w-settings'), async (req: AuthReque
       return res.status(404).json({ error: 'Deletion request not found' });
     }
 
-    const updated = await (prisma as any).deletionRequest.update({
+    const updated = await prisma.deletionRequest.update({
       where: { id: req.params.id as string },
       data: {
         status,
