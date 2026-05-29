@@ -6,6 +6,10 @@ import { authenticate, requireModule, type AuthRequest } from '../middleware/aut
 const router = Router();
 router.use(authenticate);
 
+// Helper: transform empty string to null
+const emptyToNull = z.preprocess((v) => (v === '' ? null : v), z.string().nullish());
+const emptyToNullUuid = z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullish());
+
 const employeeSchema = z.object({
   empNo: z.string().min(1),
   firstName: z.string().min(1),
@@ -13,45 +17,45 @@ const employeeSchema = z.object({
   idNumber: z.string().default(''),
   role: z.string().default(''),
   department: z.string().default(''),
-  siteId: z.string().uuid().nullish(),
+  siteId: emptyToNullUuid,
   status: z.enum(['ACTIVE', 'ON_LEAVE', 'TERMINATED', 'PROBATION']).default('ACTIVE'),
   email: z.string().default(''),
   phone: z.string().default(''),
-  startDate: z.string().nullish(),
+  startDate: emptyToNull,
   dailyRate: z.number().default(0),
   bankName: z.string().default(''),
   bankAccount: z.string().default(''),
   bankBranch: z.string().default(''),
   // Personal extended
-  dateOfBirth: z.string().nullish(),
-  gender: z.string().nullish(),
-  race: z.string().nullish(),
+  dateOfBirth: emptyToNull,
+  gender: emptyToNull,
+  race: emptyToNull,
   nationality: z.string().default('South African'),
   disability: z.string().default('None'),
-  bloodGroup: z.string().nullish(),
+  bloodGroup: emptyToNull,
   // EPWP
-  epwpRefNo: z.string().nullish(),
-  epwpEnrolmentDate: z.string().nullish(),
+  epwpRefNo: emptyToNull,
+  epwpEnrolmentDate: emptyToNull,
   epwpYouth: z.boolean().default(false),
   // Remuneration
   stipend: z.number().default(0),
   serviceFee: z.number().default(0),
   attendancePct: z.number().default(0),
   // Exit
-  exitDate: z.string().nullish(),
-  exitReason: z.string().nullish(),
+  exitDate: emptyToNull,
+  exitReason: emptyToNull,
   // Income Uplift
   incomeBeforeW2W: z.number().default(0),
   // Contact
-  currentAddress: z.string().nullish(),
-  permanentAddress: z.string().nullish(),
+  currentAddress: emptyToNull,
+  permanentAddress: emptyToNull,
   // Emergency Contact
-  emergencyName: z.string().nullish(),
-  emergencyRelationship: z.string().nullish(),
-  emergencyPhone: z.string().nullish(),
+  emergencyName: emptyToNull,
+  emergencyRelationship: emptyToNull,
+  emergencyPhone: emptyToNull,
   // System Access
-  customRoleId: z.string().nullish(),
-  loginPassword: z.string().nullish(),
+  customRoleId: emptyToNull,
+  loginPassword: emptyToNull,
   // Onboarding
   onboardStatus: z.string().default('Pending'),
   uniformIssued: z.boolean().default(false),
@@ -169,8 +173,8 @@ router.put('/:id', requireModule('employees'), async (req: AuthRequest, res, nex
       where: { id: req.params.id as string },
       data: {
         ...data,
-        siteId: data.siteId || undefined,
-        startDate: data.startDate ? new Date(data.startDate) : undefined,
+        siteId: data.siteId !== undefined ? (data.siteId || null) : undefined,
+        startDate: data.startDate !== undefined ? (data.startDate ? new Date(data.startDate) : null) : undefined,
         status: data.status as any,
       },
       include: { site: { select: { id: true, name: true } } },
