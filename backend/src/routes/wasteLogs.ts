@@ -81,16 +81,21 @@ router.post('/', async (req: AuthRequest, res, next) => {
     const data = logSchema.parse(req.body);
     const totalValue = data.quantity * data.pricePerUnit;
 
+    // Sanitize empty strings to null for FK fields
+    const siteId = data.siteId || null;
+    const wasteTypeId = data.wasteTypeId || null;
+    const collectorId = data.collectorId || null;
+
     const log = await prisma.wasteLog.create({
       data: {
         date: new Date(data.date),
-        siteId: data.siteId || null,
-        wasteTypeId: data.wasteTypeId || null,
+        siteId,
+        wasteTypeId,
         quantity: data.quantity,
         unit: data.unit,
         pricePerUnit: data.pricePerUnit,
         totalValue,
-        collectorId: data.collectorId || null,
+        collectorId,
         notes: data.notes || null,
         createdById: req.userId,
         status: 'PENDING',

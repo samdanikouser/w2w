@@ -187,7 +187,8 @@ export default function EmployeesPage() {
   // ── Handlers ──
   const openAdd = () => {
     setEditingId(null);
-    setFormData({ ...EMPTY_FORM, empNo: `W2W-${String(total + 1).padStart(4, '0')}` });
+    const ts = Date.now().toString(36).toUpperCase().slice(-5);
+    setFormData({ ...EMPTY_FORM, empNo: `W2W-${ts}` });
     setShowModal(true);
   };
 

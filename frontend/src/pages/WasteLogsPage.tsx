@@ -137,7 +137,7 @@ export default function WasteLogsPage() {
         const qty = wasteInputs[c.id];
         let depotName = '';
         if (form.depotId) {
-          const d = sites.find((s: any) => s.id === form.depotId);
+          const d = depots.find((dd: any) => dd.id === form.depotId);
           if (d) depotName = d.name;
         }
 
@@ -152,8 +152,8 @@ export default function WasteLogsPage() {
           siteId: form.siteId || null,
           quantity: qty,
           unit: c.unit || 'kg',
-          pricePerUnit: c.pricePerUnit,
-          wasteTypeId: c.id,
+          pricePerUnit: c.pricePerKg || c.pricePerUnit || 0,
+          wasteTypeId: c.id || null,
           collectorId: form.collectorId || null,
           notes: noteStr,
         });
@@ -165,9 +165,10 @@ export default function WasteLogsPage() {
       setShowModal(false);
       setForm({ date: new Date().toISOString().split('T')[0], siteId: '', depotId: '', collectorId: '', notes: '' });
       setWasteInputs({});
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Failed to save waste collection.");
+      const msg = err?.response?.data?.error || err.message || 'Failed to save waste collection.';
+      alert(msg);
     } finally {
       setIsSubmitting(false);
     }
