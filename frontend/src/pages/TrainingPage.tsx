@@ -71,13 +71,13 @@ export default function TrainingPage() {
   /* ── Mutations ── */
   const createModMut = useMutation({
     mutationFn: (p: any) => trainingApi.createModule(p),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['training', 'modules'] }); setModModal(false); }
-    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['training', 'modules'] }); setModModal(false); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
   const updateModMut = useMutation({
     mutationFn: ({ id, p }: any) => trainingApi.updateModule(id, p),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['training', 'modules'] }); setModModal(false); }
-    onError: (err: any) => alert(err?.response?.data?.error || err.message || "Something went wrong."),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['training', 'modules'] }); setModModal(false); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
   const deleteModMut = useMutation({
     mutationFn: (id: string) => trainingApi.deleteModule(id),
