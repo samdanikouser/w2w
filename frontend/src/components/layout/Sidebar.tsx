@@ -104,9 +104,14 @@ export default function Sidebar() {
     allowedIds = allowedIds.map((id) => id === 'settings' ? 'w2w-settings' : id);
   }
 
+  // Force allow facilities for now to prevent caching issues
+  if (!allowedIds.includes('facilities')) {
+    allowedIds.push('facilities');
+  }
+
   const filteredModules = ALL_MODULES.filter((m) => allowedIds.includes(m.id));
   const sections = buildSections(filteredModules);
-  const roleLabel = user.roleName || user.role.replace(/_/g, ' ');
+  const roleLabel = user.roleName || user.role?.replace(/_/g, ' ') || 'Unknown Role';
 
   return (
     <aside

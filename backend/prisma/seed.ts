@@ -52,7 +52,7 @@ async function main() {
     create: {
       name: 'Super Admin',
       description: 'System Administrator with full access',
-      modules: ['dashboard','sites','epr-reports','pl-register','reports','demographics','employees','onboarding','attendance','check-in-out','beneficiary','stock-register','stock-variance','vehicles','depots','depot-scanner','training','violations','audit-log','waste-logs','w2w-settings'],
+      modules: ['dashboard','facilities','epr-reports','pl-register','reports','demographics','employees','onboarding','attendance','check-in-out','beneficiary','stock-register','stock-variance','vehicles','depots','depot-scanner','training','violations','audit-log','waste-logs','w2w-settings'],
     },
   });
 

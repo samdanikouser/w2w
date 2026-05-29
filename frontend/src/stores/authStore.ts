@@ -48,6 +48,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem('w2w_token', res.token);
       const user = mapApiUser(res.user);
       const mode = user.modules?.includes('dashboard') ? 'boh' : 'fo';
+      if (user.siteName) {
+        try {
+          const org = JSON.parse(localStorage.getItem('w2w_org') || '{}');
+          org.orgName = user.siteName;
+          localStorage.setItem('w2w_org', JSON.stringify(org));
+        } catch (e) {}
+      }
       window.location.hash = 'dashboard';
       set({ user, isAuthenticated: true, appMode: mode });
       return true;
@@ -62,6 +69,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem('w2w_token', res.token);
       const user = mapApiUser(res.user);
       const mode = user.modules?.includes('dashboard') ? 'boh' : 'fo';
+      if (user.siteName) {
+        try {
+          const org = JSON.parse(localStorage.getItem('w2w_org') || '{}');
+          org.orgName = user.siteName;
+          localStorage.setItem('w2w_org', JSON.stringify(org));
+        } catch (e) {}
+      }
       window.location.hash = 'dashboard';
       set({ user, isAuthenticated: true, appMode: mode });
       return true;
@@ -100,6 +114,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       const apiUser = await authApi.me();
       const user = mapApiUser(apiUser);
       const mode = user.modules?.includes('dashboard') ? 'boh' : 'fo';
+      if (user.siteName) {
+        try {
+          const org = JSON.parse(localStorage.getItem('w2w_org') || '{}');
+          org.orgName = user.siteName;
+          localStorage.setItem('w2w_org', JSON.stringify(org));
+        } catch (e) {}
+      }
       set({ user, isAuthenticated: true, appMode: mode, isLoading: false });
     } catch {
       localStorage.removeItem('w2w_token');

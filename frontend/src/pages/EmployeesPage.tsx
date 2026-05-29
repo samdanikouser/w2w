@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { employeesApi, wasteLogsApi, rolesApi, sitesApi, type EmployeePayload } from '../api/endpoints';
+import { employeesApi, wasteLogsApi, rolesApi, sitesApi, depotsApi, type EmployeePayload } from '../api/endpoints';
 import { useNavStore } from '../stores/navStore';
 import { exportCsv } from '../utils/csv';
 import {
@@ -136,6 +136,12 @@ export default function EmployeesPage() {
     queryKey: ['sites'],
     queryFn: () => sitesApi.list(),
   });
+
+  const { data: depotsData = [] } = useQuery({
+    queryKey: ['depots'],
+    queryFn: () => depotsApi.list(),
+  });
+
   const allLogs: any[] = wasteLogsData?.data || [];
 
   const employees: any[] = data?.data || [];
@@ -165,11 +171,13 @@ export default function EmployeesPage() {
   const createMut = useMutation({
     mutationFn: (payload: EmployeePayload) => employeesApi.create(payload),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['employees'] }); setShowModal(false); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Failed to create employee')
   });
   const updateMut = useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: Partial<EmployeePayload> }) =>
       employeesApi.update(id, payload),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['employees'] }); setShowModal(false); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Failed to update employee')
   });
   const deleteMut = useMutation({
     mutationFn: (id: string) => employeesApi.delete(id),
@@ -565,7 +573,20 @@ export default function EmployeesPage() {
                 <FormField label="Assigned Depot / Site">
                   <select className="fc" value={formData.siteId || ''} onChange={(e) => updateField('siteId', e.target.value || null)}>
                     <option value="">No Site (Global/HQ)</option>
-                    {sitesData.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    {depotsData.length > 0 && (
+                      <optgroup label="Depots">
+                        {depotsData.map((d: any) => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {sitesData.length > 0 && (
+                      <optgroup label="Sites">
+                        {sitesData.map((s: any) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </FormField>
                 <FormField label="Status">

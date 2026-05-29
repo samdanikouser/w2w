@@ -20,107 +20,107 @@ interface ModuleDoc {
 
 const MODULE_DOCS: ModuleDoc[] = [
   {
-    id: 'dashboard', title: 'Dashboard', icon: <LayoutDashboard size={16} />, section: 'Programme',
+    id: 'dashboard', title: 'Dashboard', icon: <LayoutDashboard size={16} />, section: 'Overview',
     description: 'Your central command centre showing real-time programme metrics, waste collection trends, employee stats, and financial summaries.',
     features: ['Live KPI cards (employees, waste, revenue, sites)', 'Weekly collection trend chart', 'Quick navigation to all modules', 'Programme health indicators'],
     tips: ['The dashboard auto-refreshes every 60 seconds', 'Click any stat card to navigate to the detailed page'],
   },
   {
-    id: 'sites', title: 'Sites & Regions', icon: <MapPin size={16} />, section: 'Programme',
+    id: 'facilities', title: 'Facility Hierarchy', icon: <MapPin size={16} />, section: 'Overview',
     description: 'Manage all cooperatives, depots, and buyback centres. Track site status, regions, and assign employees.',
-    features: ['Add/edit/deactivate sites', 'Categorise by type (Cooperative, Depot, Buyback Centre)', 'Region-based filtering', 'View employees assigned per site'],
+    features: ['Add/edit/delete/deactivate sites', 'Categorise by type (Cooperative, Depot, Buyback Centre)', 'Region-based filtering', 'View employees assigned per site', 'Dynamic conditional metrics for each facility type'],
   },
   {
-    id: 'epr-reports', title: 'EPR Monthly Reports', icon: <BarChart3 size={16} />, section: 'Programme',
-    description: 'Extended Producer Responsibility monthly compliance reporting. Generate, submit, and track report status.',
-    features: ['Dynamic material breakdown based on configured Waste Types', 'Auto-calculate tonnage from waste logs', 'Monthly breakdown by waste type and PRO partner', 'Export reports for PRO submission'],
-  },
-  {
-    id: 'pl-register', title: 'P&L Entry Register', icon: <DollarSign size={16} />, section: 'Finance',
-    description: 'Record all financial transactions — revenue from waste sales and programme expenses.',
-    features: ['Revenue and expense tracking', 'Category-based classification', 'Reference number linking', 'Monthly P&L summary'],
-  },
-  {
-    id: 'reports', title: 'Reports & Export', icon: <TrendingUp size={16} />, section: 'Finance',
-    description: 'Generate detailed analytics and export reports for stakeholders, funders, and compliance bodies.',
-    features: ['Revenue vs Expense charts', 'Waste collection analytics', 'Employee productivity metrics', 'CSV/PDF export capability'],
-  },
-  {
-    id: 'demographics', title: 'Demographics', icon: <Users size={16} />, section: 'Finance',
-    description: 'Workforce composition analytics — gender, age, disability status, and geographic distribution.',
-    features: ['Gender ratio breakdown', 'Age distribution charts', 'Disability status tracking', 'Regional workforce mapping'],
-  },
-  {
-    id: 'employees', title: 'Employees', icon: <Users size={16} />, section: 'People',
-    description: 'Full employee lifecycle management — from onboarding to termination. Manage personal details, banking, and ID cards.',
-    features: ['Employee directory with search & filter', 'Personal info, banking, and ID management', 'Status tracking (Active, On Leave, Probation, Terminated)', 'Digital ID card generation', 'Payslip viewer'],
-    tips: ['SA ID and banking details are encrypted (POPIA compliant)', 'Use the filter bar to quickly find employees by site or status'],
-  },
-  {
-    id: 'onboarding', title: 'Onboarding', icon: <UserPlus size={16} />, section: 'People',
-    description: 'Track new hire pipeline — from application through induction to active status.',
-    features: ['Multi-stage onboarding pipeline', 'Document checklist', 'Induction scheduling', 'Auto-transition to active employee'],
-  },
-  {
-    id: 'attendance', title: 'Attendance Report', icon: <Clock size={16} />, section: 'People',
-    description: 'Daily check-in/check-out tracking for all employees. Monitor punctuality and leave patterns.',
-    features: ['Daily clock-in/out records', 'Attendance status (Present, Absent, Late, Half Day, Leave)', 'Hours worked calculation', 'Monthly attendance summary'],
-  },
-  {
-    id: 'beneficiary', title: 'Beneficiary Tracker', icon: <Heart size={16} />, section: 'People',
-    description: 'Track programme beneficiaries and their participation metrics.',
-    features: ['Beneficiary registration', 'Participation tracking', 'Impact metrics', 'Reporting for funders'],
-  },
-  {
-    id: 'stock-register', title: 'Stock Register', icon: <Package size={16} />, section: 'Inventory',
-    description: 'Manage PPE, consumables, and equipment inventory across all sites.',
-    features: ['Item catalogue with categories (PPE, Consumables, Equipment)', 'Quantity on-hand tracking', 'Reorder point alerts', 'Stock status indicators (OK, Low, Out)'],
-    tips: ['Set reorder points to get automatic low-stock warnings'],
-  },
-  {
-    id: 'stock-variance', title: 'Stock Variance', icon: <AlertTriangle size={16} />, section: 'Inventory',
-    description: 'Reconciliation report comparing expected vs actual stock levels to identify discrepancies.',
-    features: ['System vs Physical count comparison', 'Variance calculation', 'Shrinkage identification', 'Audit trail for stock adjustments'],
-  },
-  {
-    id: 'vehicles', title: 'Vehicles & Fleet', icon: <Truck size={16} />, section: 'Assets',
-    description: 'Fleet management for collection vehicles — service schedules, odometer tracking, and status.',
-    features: ['Vehicle registration and details', 'Service due date tracking', 'Odometer (km) logging', 'Status management (Operational, Maintenance, Decommissioned)'],
-    tips: ['Vehicles with overdue services are flagged with a red badge in the table'],
-  },
-  {
-    id: 'depots', title: 'Depot Management', icon: <Home size={16} />, section: 'Assets',
-    description: 'Manage buyback depot locations, operating hours, and material pricing.',
-    features: ['Depot directory', 'Operating schedule', 'Material pricing per depot', 'Collection volume tracking'],
-  },
-  {
-    id: 'depot-scanner', title: 'Depot Scanner', icon: <ScanLine size={16} />, section: 'Assets',
-    description: 'Live QR code scanning for waste intake at depots — real-time weight capture and logging.',
-    features: ['QR code scanning', 'Weight input and capture', 'Auto-log waste entries', 'Real-time depot dashboard'],
-  },
-  {
-    id: 'waste-logs', title: 'Waste Collection', icon: <RefreshCw size={16} />, section: 'Waste Ops',
+    id: 'waste-logs', title: 'Record Waste', icon: <RefreshCw size={16} />, section: 'Waste Operations',
     description: 'Core waste collection logging — record daily pickups, quantities, and values per site and waste type.',
     features: ['Grid-based entry for all waste streams simultaneously', 'Depot source tracking for external collections', 'Approval workflow (Pending → Approved / Rejected)', 'Bulk entry and CSV import'],
     tips: ['Logs in "Pending" status require admin approval before counting toward EPR reports', 'Use the date range filter to review specific periods'],
   },
   {
-    id: 'training', title: 'Training Tracker', icon: <BookOpen size={16} />, section: 'Training',
+    id: 'depot-scanner', title: 'Depot Scanner', icon: <ScanLine size={16} />, section: 'Waste Operations',
+    description: 'Live QR code scanning for waste intake at depots — real-time weight capture and logging.',
+    features: ['QR code scanning', 'Weight input and capture', 'Auto-log waste entries', 'Real-time depot dashboard'],
+  },
+  {
+    id: 'stock-register', title: 'Stock Register', icon: <Package size={16} />, section: 'Inventory & Assets',
+    description: 'Manage PPE, consumables, and equipment inventory across all sites.',
+    features: ['Item catalogue with categories (PPE, Consumables, Equipment)', 'Quantity on-hand tracking', 'Reorder point alerts', 'Stock status indicators (OK, Low, Out)'],
+    tips: ['Set reorder points to get automatic low-stock warnings'],
+  },
+  {
+    id: 'stock-variance', title: 'Stock Variance', icon: <AlertTriangle size={16} />, section: 'Inventory & Assets',
+    description: 'Reconciliation report comparing expected vs actual stock levels to identify discrepancies.',
+    features: ['System vs Physical count comparison', 'Variance calculation', 'Shrinkage identification', 'Audit trail for stock adjustments'],
+  },
+  {
+    id: 'vehicles', title: 'Vehicles & Fleet', icon: <Truck size={16} />, section: 'Inventory & Assets',
+    description: 'Fleet management for collection vehicles — service schedules, odometer tracking, and status.',
+    features: ['Vehicle registration and details', 'Service due date tracking', 'Odometer (km) logging', 'Status management (Operational, Maintenance, Decommissioned)'],
+    tips: ['Vehicles with overdue services are flagged with a red badge in the table'],
+  },
+  {
+    id: 'employees', title: 'Employees', icon: <Users size={16} />, section: 'Human Resources',
+    description: 'Full employee lifecycle management — from onboarding to termination. Manage personal details, banking, and ID cards.',
+    features: ['Employee directory with search & filter', 'Personal info, banking, and ID management', 'Status tracking (Active, On Leave, Probation, Terminated)', 'Digital ID card generation', 'Payslip viewer'],
+    tips: ['SA ID and banking details are encrypted (POPIA compliant)', 'Use the filter bar to quickly find employees by site or status'],
+  },
+  {
+    id: 'onboarding', title: 'Onboarding', icon: <UserPlus size={16} />, section: 'Human Resources',
+    description: 'Track new hire pipeline — from application through induction to active status.',
+    features: ['Multi-stage onboarding pipeline', 'Document checklist', 'Induction scheduling', 'Auto-transition to active employee'],
+  },
+  {
+    id: 'attendance', title: 'Attendance Report', icon: <Clock size={16} />, section: 'Human Resources',
+    description: 'Daily check-in/check-out tracking for all employees. Monitor punctuality and leave patterns.',
+    features: ['Daily clock-in/out records', 'Attendance status (Present, Absent, Late, Half Day, Leave)', 'Hours worked calculation', 'Monthly attendance summary'],
+  },
+  {
+    id: 'check-in-out', title: 'Check In / Check Out', icon: <Clock size={16} />, section: 'Human Resources',
+    description: 'Daily check-in/check-out portal for employees.',
+    features: ['Quick check-in', 'Location tracking (if enabled)'],
+  },
+  {
+    id: 'training', title: 'Training Tracker', icon: <BookOpen size={16} />, section: 'Human Resources',
     description: 'Track employee training progress, certifications, and compliance with mandatory modules.',
     features: ['Dynamic creation and management of Training Modules', 'Assign specific modules to all active employees instantly', 'Mandatory vs optional classification', 'Employee enrolment and progress tracking', 'Completion dates and scores'],
   },
   {
-    id: 'violations', title: 'Warnings & Violations', icon: <AlertTriangle size={16} />, section: 'Compliance',
+    id: 'beneficiary', title: 'Beneficiary Tracker', icon: <Heart size={16} />, section: 'Human Resources',
+    description: 'Track programme beneficiaries and their participation metrics.',
+    features: ['Beneficiary registration', 'Participation tracking', 'Impact metrics', 'Reporting for funders'],
+  },
+  {
+    id: 'pl-register', title: 'P&L Entry Register', icon: <DollarSign size={16} />, section: 'Finance & Reporting',
+    description: 'Record all financial transactions — revenue from waste sales and programme expenses.',
+    features: ['Revenue and expense tracking', 'Category-based classification', 'Reference number linking', 'Monthly P&L summary'],
+  },
+  {
+    id: 'epr-reports', title: 'EPR Monthly Reports', icon: <BarChart3 size={16} />, section: 'Finance & Reporting',
+    description: 'Extended Producer Responsibility monthly compliance reporting. Generate, submit, and track report status.',
+    features: ['Dynamic material breakdown based on configured Waste Types', 'Auto-calculate tonnage from waste logs', 'Monthly breakdown by waste type and PRO partner', 'Export reports for PRO submission'],
+  },
+  {
+    id: 'reports', title: 'Reports & Export', icon: <TrendingUp size={16} />, section: 'Finance & Reporting',
+    description: 'Generate detailed analytics and export reports for stakeholders, funders, and compliance bodies.',
+    features: ['Revenue vs Expense charts', 'Waste collection analytics', 'Employee productivity metrics', 'CSV/PDF export capability'],
+  },
+  {
+    id: 'demographics', title: 'Demographics', icon: <Users size={16} />, section: 'Finance & Reporting',
+    description: 'Workforce composition analytics — gender, age, disability status, and geographic distribution.',
+    features: ['Gender ratio breakdown', 'Age distribution charts', 'Disability status tracking', 'Regional workforce mapping'],
+  },
+  {
+    id: 'violations', title: 'Warnings & Violations', icon: <AlertTriangle size={16} />, section: 'Compliance & System',
     description: 'Disciplinary record keeping — from verbal warnings through to dismissal documentation.',
     features: ['Severity levels (Verbal, Written, Final Written, Dismissal)', 'Status tracking (Open, Acknowledged, Closed)', 'Issued-by user attribution', 'Notes and evidence attachment'],
   },
   {
-    id: 'audit-log', title: 'Audit Log', icon: <CheckSquare size={16} />, section: 'Compliance',
+    id: 'audit-log', title: 'Audit Log', icon: <CheckSquare size={16} />, section: 'Compliance & System',
     description: 'POPIA-compliant event trail logging all system actions — creates, updates, deletes, logins, and data exports.',
     features: ['Full action history', 'User attribution and IP logging', 'Entity-level tracking', 'CSV export for compliance audits', 'Retention-period compliant'],
   },
   {
-    id: 'w2w-settings', title: 'W2W Settings', icon: <Settings size={16} />, section: 'System',
+    id: 'w2w-settings', title: 'W2W Settings', icon: <Settings size={16} />, section: 'Compliance & System',
     description: 'Central configuration hub for the entire programme — organisation details, waste categories, training, payments, and access control.',
     features: [
       'Organisation — name, programme info, VAT, EPR PRO, support contacts',

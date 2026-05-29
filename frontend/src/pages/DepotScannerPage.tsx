@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { employeesApi, sitesApi, wasteLogsApi, wasteTypesApi } from '../api/endpoints';
+import { employeesApi, sitesApi, depotsApi, wasteLogsApi, wasteTypesApi } from '../api/endpoints';
 
 function genDN() {
   return 'DN-' + String(Math.floor(Math.random() * 90000) + 10000);
@@ -27,6 +27,10 @@ export default function DepotScannerPage() {
     queryKey: ['sites'],
     queryFn: () => sitesApi.list(),
   });
+  const { data: depotsData = [] } = useQuery({
+    queryKey: ['depots'],
+    queryFn: () => depotsApi.list(),
+  });
   const { data: logData } = useQuery({
     queryKey: ['waste-logs', 'today'],
     queryFn: () => wasteLogsApi.list({}),
@@ -38,15 +42,10 @@ export default function DepotScannerPage() {
 
   const employees: any[] = empData?.data || [];
   const sites: any[] = Array.isArray(sitesData) ? sitesData : (sitesData as any)?.data || [];
+  const depots: any[] = Array.isArray(depotsData) ? depotsData : (depotsData as any)?.data || [];
   const logs: any[] = logData?.data || [];
 
   const wasteTypes = Array.isArray(wasteTypesData) ? wasteTypesData : (wasteTypesData as any)?.data || [];
-
-  /* depots / buyback centres */
-  const depots = useMemo(
-    () => sites.filter((s: any) => s.type === 'DEPOT' || s.type === 'BUYBACK_CENTRE'),
-    [sites],
-  );
 
   /* today's logs */
   const today = new Date().toISOString().slice(0, 10);

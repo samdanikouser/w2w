@@ -28,14 +28,26 @@ const siteSchema = z.object({
   provinceId: z.string().optional().default(''),
   municipalityId: z.string().optional().default(''),
   subRegionId: z.string().optional().default(''),
+  depotId: z.string().optional().nullish(),
+  currentSkipBinCount: z.number().optional().nullish(),
+  gateFee: z.number().optional().nullish(),
+  weighbridge: z.string().optional().nullish(),
+  maxVehicleTonnage: z.number().optional().nullish(),
+  acceptedMaterials: z.array(z.string()).optional().default([]),
+  metadata: z.any().optional(),
 });
 
 // ── GET /api/sites ──
 router.get('/', async (req: AuthRequest, res, next) => {
   try {
+    const { depot_id } = req.query;
     const where: any = {};
-    if (req.userSiteId) {
+    const hasAdminAccess = req.userModules?.some(m => ['w2w-settings', 'facilities', 'sites'].includes(m));
+    if (req.userSiteId && !hasAdminAccess) {
       where.id = req.userSiteId;
+    }
+    if (depot_id) {
+      where.depotId = String(depot_id);
     }
 
     const sites = await prisma.site.findMany({
@@ -54,7 +66,17 @@ router.post('/', async (req: AuthRequest, res, next) => {
   try {
     const data = siteSchema.parse(req.body);
     const site = await prisma.site.create({
-      data: { ...data, lat: data.lat || null, lng: data.lng || null, status: data.status as any, type: data.type as any },
+      data: { 
+        ...data, 
+        lat: data.lat || null, 
+        lng: data.lng || null, 
+        status: data.status as any, 
+        type: data.type as any,
+        depotId: data.depotId || null,
+        currentSkipBinCount: data.currentSkipBinCount || null,
+        gateFee: data.gateFee || null,
+        weighbridge: data.weighbridge || null
+      },
     });
 
     await prisma.auditLog.create({

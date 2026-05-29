@@ -4,6 +4,7 @@ import {
   wasteLogsApi,
   wasteTypesApi,
   sitesApi,
+  depotsApi,
   employeesApi,
   type WasteLogPayload,
 } from '../api/endpoints';
@@ -68,6 +69,10 @@ export default function WasteLogsPage() {
     queryKey: ['sites'],
     queryFn: sitesApi.list,
   });
+  const { data: depotsData = [] } = useQuery({
+    queryKey: ['depots'],
+    queryFn: depotsApi.list,
+  });
   const { data: empData } = useQuery({
     queryKey: ['employees', 'all'],
     queryFn: () => employeesApi.list({}),
@@ -77,6 +82,7 @@ export default function WasteLogsPage() {
   const summary = data?.summary || { totalEntries: 0, totalQuantity: 0, totalValue: 0 };
   const wasteTypeList = Array.isArray(wasteTypes) ? (wasteTypes as any[]) : (wasteTypes as any).data || [];
   const sites: any[] = Array.isArray(sitesData) ? (sitesData as any[]) : (sitesData as any).data || [];
+  const depots: any[] = Array.isArray(depotsData) ? (depotsData as any[]) : (depotsData as any).data || [];
   const employees: any[] = empData?.data || [];
 
   // ── Client-side search filter ──
@@ -471,8 +477,8 @@ export default function WasteLogsPage() {
                 <Field label="Depot">
                   <select className="fc" value={form.depotId} onChange={(e) => setForm({ ...form, depotId: e.target.value })}>
                     <option value="">Select depot</option>
-                    {sites.filter((s: any) => s.type === 'DEPOT' || s.type === 'BUYBACK_CENTRE').map((s: any) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
+                    {depots.map((d: any) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
                     ))}
                   </select>
                 </Field>

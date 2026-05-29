@@ -50,7 +50,7 @@ export default function TrainingPage() {
   
   const isMandatory = (name: string) => {
     const m = (modules as any[]).find(x => x.name.toLowerCase() === name.toLowerCase());
-    return m ? m.type === 'MANDATORY' : false;
+    return m ? (m.type || '').toUpperCase() === 'MANDATORY' : false;
   };
 
 
@@ -359,21 +359,13 @@ export default function TrainingPage() {
                 <div className="cs">Required for all active employees</div>
               </div>
             </div>
-            <div className="cb" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {modules.filter((m:any) => m.type === 'MANDATORY').map((mod: any, i: number) => {
+            <div className="cb" style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 14 }}>
+              {modules.filter((m:any) => (m.type || '').toUpperCase() === 'MANDATORY').map((mod: any, i: number) => {
                 const name = mod.name;
                 const completed = getCompletedCount(mod.id);
                 const total = activeEmployees.length;
                 return (
-                  <div key={name} style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 8,
-                  }}>
-                    <div style={{
-                      width: 26, height: 26, borderRadius: 6, display: 'flex',
-                      alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700,
-                      background: 'var(--color-green-light, #e6f9ee)', color: 'var(--color-green)',
-                    }}>{i + 1}</div>
+                  <div key={mod.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-surface2)' }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 12, fontWeight: 600 }}>{name}</div>
                       <div style={{ fontSize: 10, color: 'var(--color-text3)' }}>{completed}/{total} completed</div>
@@ -396,20 +388,12 @@ export default function TrainingPage() {
                 <div className="ct">Optional Modules</div>
               </div>
             </div>
-            <div className="cb" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {modules.filter((m:any) => m.type === 'OPTIONAL').map((mod: any, i: number) => {
+            <div className="cb" style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 14 }}>
+              {modules.filter((m:any) => (m.type || '').toUpperCase() === 'OPTIONAL').map((mod: any, i: number) => {
                 const name = mod.name;
                 const completed = getCompletedCount(mod.id);
                 return (
-                  <div key={name} style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 8,
-                  }}>
-                    <div style={{
-                      width: 26, height: 26, borderRadius: 6, display: 'flex',
-                      alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700,
-                      background: 'var(--color-surface3)', color: 'var(--color-text3)',
-                    }}>{i + 1}</div>
+                  <div key={mod.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-surface2)' }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 12, fontWeight: 600 }}>{name}</div>
                       <div style={{ fontSize: 10, color: 'var(--color-text3)' }}>{completed} completed</div>
@@ -441,14 +425,14 @@ export default function TrainingPage() {
               <thead>
                 <tr style={{ background: 'var(--color-ink)', color: 'white' }}>
                   <th style={{ position: 'sticky', left: 0, background: 'var(--color-ink)', zIndex: 2, minWidth: 180 }}>Employee</th>
-                  {modules.filter((m:any)=>m.type==='MANDATORY').map((m:any) => (
+                  {modules.filter((m:any)=>(m.type || '').toUpperCase() === 'MANDATORY').map((m:any) => (
                     <th key={m.id} style={{ fontSize: 10, whiteSpace: 'nowrap', textAlign: 'center', padding: '8px 6px', maxWidth: 100 }}>{m.name}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {activeEmployees.length === 0 ? (
-                  <tr><td colSpan={modules.filter((m:any)=>m.type==='MANDATORY').length + 1} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>No active employees found.</td></tr>
+                  <tr><td colSpan={modules.filter((m:any)=>(m.type || '').toUpperCase() === 'MANDATORY').length + 1} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>No active employees found.</td></tr>
                 ) : (
                   activeEmployees.map((emp: any) => {
                     const initials = `${(emp.firstName || '')[0] || ''}${(emp.lastName || '')[0] || ''}`.toUpperCase();
@@ -464,7 +448,7 @@ export default function TrainingPage() {
                             <span style={{ fontSize: 12 }}>{emp.firstName} {emp.lastName}</span>
                           </div>
                         </td>
-                        {modules.filter((m:any)=>m.type==='MANDATORY').map((mod:any) => {
+                        {modules.filter((m:any)=>(m.type || '').toUpperCase() === 'MANDATORY').map((mod:any) => {
                           const rec = allRecords.find((r: any) => r.employeeId === emp.id && r.trainingModuleId === mod.id);
                           let cell = <span style={{ color: 'var(--color-text3)' }}>✗</span>;
                           if (rec) {
@@ -503,10 +487,10 @@ export default function TrainingPage() {
                   <select className="fc" value={assignForm.moduleName} onChange={(e) => setAssignForm({ ...assignForm, moduleName: e.target.value })}>
                     <option value="">— Select —</option>
                     <optgroup label="Mandatory">
-                      {modules.filter((m:any) => m.type==='MANDATORY').map((m:any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      {modules.filter((m:any) => (m.type || '').toUpperCase() === 'MANDATORY').map((m:any) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </optgroup>
                     <optgroup label="Optional">
-                      {modules.filter((m:any) => m.type==='OPTIONAL').map((m:any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      {modules.filter((m:any) => (m.type || '').toUpperCase() === 'OPTIONAL').map((m:any) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </optgroup>
                   </select>
                 </div>
@@ -551,10 +535,10 @@ export default function TrainingPage() {
                   <select className="fc" value={assignAllForm.moduleName} onChange={(e) => setAssignAllForm({ ...assignAllForm, moduleName: e.target.value })}>
                     <option value="">— Select —</option>
                     <optgroup label="Mandatory">
-                      {modules.filter((m:any) => m.type==='MANDATORY').map((m:any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      {modules.filter((m:any) => (m.type || '').toUpperCase() === 'MANDATORY').map((m:any) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </optgroup>
                     <optgroup label="Optional">
-                      {modules.filter((m:any) => m.type==='OPTIONAL').map((m:any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      {modules.filter((m:any) => (m.type || '').toUpperCase() === 'OPTIONAL').map((m:any) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </optgroup>
                   </select>
                 </div></div>

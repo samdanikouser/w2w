@@ -8,11 +8,12 @@ import EmployeesPage from './pages/EmployeesPage';
 import WasteLogsPage from './pages/WasteLogsPage';
 import SitesPage from './pages/SitesPage';
 import DemographicsPage from './pages/DemographicsPage';
+import FacilityDashboard from './pages/FacilityDashboard';
 import DepotsPage from './pages/DepotsPage';
+import CheckInOutPage from './pages/CheckInOutPage';
 import BeneficiaryPage from './pages/BeneficiaryPage';
 import OnboardingPage from './pages/OnboardingPage';
 import AttendancePage from './pages/AttendancePage';
-import CheckInOutPage from './pages/CheckInOutPage';
 import VehiclesPage from './pages/VehiclesPage';
 import TrainingPage from './pages/TrainingPage';
 import ViolationsPage from './pages/ViolationsPage';
@@ -39,10 +40,30 @@ function App() {
   const { isAuthenticated, user } = useAuthStore();
   const { activePage } = useNavStore();
   const [showLogin, setShowLogin] = useState(true);
+  const [isSetupComplete, setIsSetupComplete] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      import('./api/endpoints').then(({ authApi }) => {
+        authApi.setupStatus().then((res) => {
+          setIsSetupComplete(res.isSetupComplete);
+          // If setup is complete, always show login (never register)
+          setShowLogin(res.isSetupComplete ? true : false);
+        }).catch(() => {
+          // On error (backend down etc), default to login — never expose register
+          setIsSetupComplete(true);
+          setShowLogin(true);
+        });
+      });
+    }
+  }, [isAuthenticated]);
 
   if (!isAuthenticated) {
-    if (showLogin) {
-      return <LoginPage onGoToRegister={() => setShowLogin(false)} />;
+    if (isSetupComplete === null) return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center' }}>Loading...</div>;
+
+    // If setup is complete, ALWAYS show login — never allow register
+    if (isSetupComplete || showLogin) {
+      return <LoginPage onGoToRegister={isSetupComplete ? undefined : () => setShowLogin(false)} />;
     }
     return <RegisterOrgPage onGoToLogin={() => setShowLogin(true)} />;
   }
@@ -68,6 +89,7 @@ function App() {
 
     switch (activePage) {
       case 'dashboard': return <DashboardPage />;
+      case 'facilities': return <FacilityDashboard />;
       case 'employees': return <EmployeesPage />;
       case 'waste-logs': return <WasteLogsPage />;
       case 'sites': return <SitesPage />;

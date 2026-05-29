@@ -59,10 +59,12 @@ export default function PLRegisterPage() {
   const createMut = useMutation({
     mutationFn: (p: TransactionPayload) => transactionsApi.create(p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['transactions'] }); setModal(null); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Failed to add entry')
   });
   const updateMut = useMutation({
     mutationFn: ({ id, p }: { id: string; p: Partial<TransactionPayload> }) => transactionsApi.update(id, p),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['transactions'] }); setModal(null); },
+    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Failed to update entry')
   });
   const deleteMut = useMutation({
     mutationFn: (id: string) => transactionsApi.delete(id),
@@ -379,15 +381,10 @@ export default function PLRegisterPage() {
               <div className="fgrid">
                 <div className="fg"><label className="fl">Date <span className="req">*</span></label>
                   <input className="fc" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
-                <div className="fg"><label className="fl">Type</label>
-                  <select className="fc" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as any, category: '' })}>
-                    {typeGroups.map((group) => (
-                      <optgroup key={group} label={group}>
-                        {plTypes.filter((t: PLType) => t.group === group).map((t: PLType) => (
-                          <option key={t.id} value={t.group === 'Income' ? 'REVENUE' : 'EXPENSE'}>{t.label}</option>
-                        ))}
-                      </optgroup>
-                    ))}
+                <div className="fg"><label className="fl">Type <span className="req">*</span></label>
+                  <select className="fc" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as 'REVENUE' | 'EXPENSE', category: '' })}>
+                    <option value="REVENUE">Revenue</option>
+                    <option value="EXPENSE">Expense</option>
                   </select>
                 </div>
                 <div className="fg"><label className="fl">Category</label>

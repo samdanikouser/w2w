@@ -18,7 +18,9 @@ export function errorHandler(
   if (err.name === 'PrismaClientKnownRequestError') {
     const code = (err as any).code;
     if (code === 'P2002') {
-      return res.status(409).json({ error: 'A record with that value already exists.' });
+      const target = (err as any).meta?.target;
+      const field = Array.isArray(target) ? target.join(', ') : target || 'field';
+      return res.status(409).json({ error: `A record with that ${field} already exists.` });
     }
     if (code === 'P2025') {
       return res.status(404).json({ error: 'Record not found.' });

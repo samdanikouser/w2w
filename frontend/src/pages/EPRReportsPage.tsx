@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { sitesApi, wasteTypesApi } from '../api/endpoints';
+import { sitesApi, wasteTypesApi, depotsApi, cooperativesApi } from '../api/endpoints';
 import { Plus, X, Eye, Printer } from 'lucide-react';
 import { loadGeography } from '../utils/geography';
 
@@ -116,9 +116,18 @@ export default function EPRReportsPage() {
   const [form, setForm] = useState<CreateForm>({ dateFrom: '', dateTo: '', siteId: '', buyerConfirmation: '', traceabilityRef: '', materialBreakdown: {} });
 
   const { data: sitesData = [] } = useQuery({ queryKey: ['sites'], queryFn: () => sitesApi.list() });
+  const { data: depotsData = [] } = useQuery({ queryKey: ['depots'], queryFn: () => depotsApi.list() });
+  const { data: coopsData = [] } = useQuery({ queryKey: ['coops'], queryFn: () => cooperativesApi.list() });
   const { data: wasteTypes = [] } = useQuery({ queryKey: ['waste-types'], queryFn: () => wasteTypesApi.list() });
-  const sites: { id: string; name: string; ward?: string; municipalityId?: string }[] =
-    Array.isArray(sitesData) ? sitesData : (sitesData as Record<string, unknown>)?.data as { id: string; name: string; ward?: string; municipalityId?: string }[] || [];
+
+  const rawSites = Array.isArray(sitesData) ? sitesData : (sitesData as any)?.data || [];
+  const rawDepots = Array.isArray(depotsData) ? depotsData : (depotsData as any)?.data || [];
+  const rawCoops = Array.isArray(coopsData) ? coopsData : (coopsData as any)?.data || [];
+  const rawWasteTypes = Array.isArray(wasteTypes) ? wasteTypes : (wasteTypes as any)?.data || [];
+  
+  const sites: { id: string; name: string; ward?: string; municipalityId?: string }[] = useMemo(() => {
+    return [...rawSites, ...rawDepots, ...rawCoops];
+  }, [rawSites, rawDepots, rawCoops]);
 
   // persist whenever reports change
   useEffect(() => { saveReports(reports); }, [reports]);
@@ -142,13 +151,13 @@ export default function EPRReportsPage() {
 
   /* ── Material aggregation for the categories card ── */
   const materialTotals: Record<string, number> = {};
-  for (const wt of (wasteTypes as any[])) {
+  for (const wt of rawWasteTypes) {
     materialTotals[wt.id] = reports.reduce((s, r) => s + (r.materialBreakdown[wt.id] ?? 0), 0);
   }
 
   /* ── Handlers ── */
   const openCreate = () => {
-    setForm({ dateFrom: '', dateTo: '', siteId: '', buyerConfirmation: '', traceabilityRef: '', materialBreakdown: emptyBreakdown(wasteTypes as any[]) });
+    setForm({ dateFrom: '', dateTo: '', siteId: '', buyerConfirmation: '', traceabilityRef: '', materialBreakdown: emptyBreakdown(rawWasteTypes) });
     setModal('create');
   };
 
@@ -173,6 +182,7 @@ export default function EPRReportsPage() {
       status: 'Submitted',
       materialBreakdown: { ...bd },
       verifiedTonnage: parseFloat(tonnage.toFixed(1)),
+      totalRecovery: tonnage * 1000,
       buyerConfirmation: form.buyerConfirmation,
       traceabilityRef: form.traceabilityRef,
       eprCompliant: tonnage > 0,
@@ -304,25 +314,27 @@ export default function EPRReportsPage() {
           </div>
         </div>
         <div className="cb">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
-            {(wasteTypes as any[]).map(wt => {
-              return (
-                <div key={wt.id} style={{
-                  padding: '12px 14px', border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius-md)', background: 'var(--color-surface2)',
-                }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-                    {wt.name}
+          <div className="tw" style={{ overflowX: 'auto', paddingBottom: 10 }}>
+            <div style={{ display: 'flex', gap: 10 }}>
+              {rawWasteTypes.map(wt => {
+                return (
+                  <div key={wt.id} style={{
+                    padding: '12px 14px', border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-md)', background: 'var(--color-surface2)', minWidth: 140,
+                  }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                      {wt.name}
+                    </div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--color-text)', letterSpacing: '-0.02em' }}>
+                      {(materialTotals[wt.id] || 0).toFixed(1)}t
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--color-text3)', marginTop: 4 }}>
+                      R{(wt.pricePerKg || 0).toFixed(2)}/kg · {wt.buyer || 'No Buyer'}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--color-text)', letterSpacing: '-0.02em' }}>
-                    {(materialTotals[wt.id] || 0).toFixed(1)}t
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--color-text3)', marginTop: 4 }}>
-                    R{(wt.pricePerKg || 0).toFixed(2)}/kg · {wt.buyer || 'No Buyer'}
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
@@ -365,24 +377,23 @@ export default function EPRReportsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {MATERIAL_CODES.map(code => {
-                      const tons = active.materialBreakdown[code] ?? 0;
-                      const meta = MATERIALS[code];
-                      const revenue = tons * 1000 * meta.pricePerKg; // tons→kg
+                    {rawWasteTypes.map(wt => {
+                      const tons = active.materialBreakdown[wt.id] ?? 0;
+                      const revenue = tons * 1000 * (wt.pricePerKg || 0); // tons→kg
                       return (
-                        <tr key={code}>
-                          <td style={{ fontWeight: 600 }}>{meta.label}</td>
+                        <tr key={wt.id}>
+                          <td style={{ fontWeight: 600 }}>{wt.name}</td>
                           <td>{tons.toFixed(1)}t</td>
-                          <td>{meta.priceDisplay}</td>
+                          <td>R{(wt.pricePerKg || 0).toFixed(2)}/kg</td>
                           <td style={{ fontWeight: 600 }}>R {revenue.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                         </tr>
                       );
                     })}
                     <tr style={{ fontWeight: 700, background: 'var(--color-surface2)' }}>
                       <td>TOTAL</td>
-                      <td>{active.verifiedTonnage.toFixed(1)}t</td>
+                      <td>{(active.totalRecovery ?? 0 / 1000).toLocaleString('en-ZA', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}t</td>
                       <td></td>
-                      <td>R {(wasteTypes as any[]).reduce((s: number, wt: any) => s + ((active.materialBreakdown[wt.id] ?? 0) * 1000 * (wt.pricePerKg || 0)), 0).toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                      <td>R {rawWasteTypes.reduce((s: number, wt: any) => s + ((active.materialBreakdown[wt.id] ?? 0) * 1000 * (wt.pricePerKg || 0)), 0).toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -444,7 +455,7 @@ export default function EPRReportsPage() {
               {/* Material Breakdown */}
               <div className="fsec">Material Breakdown (tonnes)</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginTop: 14 }}>
-                {(wasteTypes as any[]).map(wt => (
+                {rawWasteTypes.map(wt => (
                   <div className="fg" key={wt.id} style={{ marginBottom: 0 }}>
                     <label className="fl">{wt.name}</label>
                     <input className="fc" type="number" step={0.1} min={0}

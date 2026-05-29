@@ -62,14 +62,23 @@ model Site {
   gps            String      @default("")
   launched       String      @default("")
   monthlyTonnage Float       @default(0)
+  currentSkipBinCount Int?
+  gateFee        Float?
+  weighbridge    String?
+  maxVehicleTonnage Float?
+  acceptedMaterials String[] @default([])
   municipalityId String      @default("")
   notes          String      @default("")
   ohsRating      Int         @default(80)
   phase          String      @default("Month 1")
   provinceId     String      @default("")
   subRegionId    String      @default("")
+  metadata       Json?
   supervisor     String      @default("")
   ward           String      @default("")
+  depotId        String?
+  depot          Depot?      @relation(fields: [depotId], references: [id])
+  cooperatives   Cooperative[]
   employees      Employee[]
   stockItems     StockItem[]
   users          User[]
@@ -367,7 +376,8 @@ enum SiteType {
   BUYBACK_CENTRE
   IWMC
   MRC
-  BBC
+  GARDEN_SITE
+  LANDFILL
 }
 
 enum SiteStatus {
@@ -455,4 +465,42 @@ enum NotificationType {
   WARNING
   SUCCESS
   ERROR
+}
+
+model Depot {
+  id                String   @id @default(uuid())
+  name              String
+  regionCode        String   @default("A")
+  physicalAddress   String   @default("")
+  managerUserId     String?
+  totalFleetCount   Int      @default(0)
+  totalCompactorTrucks Int   @default(0)
+  totalSkipLoaderTrucks Int  @default(0)
+  operatingBudget   Float    @default(0)
+  operationalStatus String   @default("active")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  sites             Site[]
+
+  @@map("depots")
+}
+
+model Cooperative {
+  id                    String   @id @default(uuid())
+  siteId                String
+  name                  String
+  registrationNumber    String   @default("")
+  contactPerson         String   @default("")
+  contactNumber         String   @default("")
+  totalMembers          Int      @default(0)
+  hasBalingMachine      Boolean  @default(false)
+  materialPayoutRates   Json?
+  dailyTonsRecovered    Float    @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  site                  Site     @relation(fields: [siteId], references: [id])
+
+  @@map("cooperatives")
 }

@@ -33,6 +33,15 @@ const changePasswordSchema = z.object({
   newPassword: passwordPolicy,
 });
 
+router.get('/setup-status', async (req, res, next) => {
+  try {
+    const userCount = await prisma.user.count();
+    res.json({ isSetupComplete: userCount > 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/login', loginLimiter, async (req, res, next) => {
   try {
     const { email, password } = loginSchema.parse(req.body);

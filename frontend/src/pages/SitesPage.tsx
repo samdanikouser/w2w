@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { sitesApi, employeesApi, wasteLogsApi, type SitePayload } from '../api/endpoints';
+import { sitesApi, employeesApi, wasteLogsApi, cooperativesApi, depotsApi, type SitePayload } from '../api/endpoints';
 import { MapPin, Building2, Plus, Download, Search, X, Edit2, Trash2, Eye } from 'lucide-react';
 import { exportCsv } from '../utils/csv';
 import { loadGeography } from '../utils/geography';
@@ -38,13 +38,30 @@ export default function SitesPage() {
   const [active, setActive] = useState<any>(null);
   const [form, setForm] = useState<SitePayload>(EMPTY);
 
-  const { data: sitesData = [] } = useQuery({ queryKey: ['sites'], queryFn: () => sitesApi.list() });
-  const { data: empData } = useQuery({ queryKey: ['employees', 'all'], queryFn: () => employeesApi.list({}) });
-  const { data: logData } = useQuery({ queryKey: ['waste-logs', 'all'], queryFn: () => wasteLogsApi.list({}) });
+  const { data: sitesData = [], isLoading } = useQuery({
+    queryKey: ['sites'],
+    queryFn: () => sitesApi.list(),
+  });
+
+  const { data: coopsData = [] } = useQuery({
+    queryKey: ['cooperatives'],
+    queryFn: () => cooperativesApi.list(),
+  });
+
+  const { data: logData } = useQuery({
+    queryKey: ['waste-logs'],
+    queryFn: () => wasteLogsApi.list({}),
+  });
+
+  const { data: empData } = useQuery({
+    queryKey: ['employees'],
+    queryFn: () => employeesApi.list(),
+  });
 
   const sites: any[] = Array.isArray(sitesData) ? sitesData : (sitesData as any)?.data || [];
   const employees: any[] = empData?.data || [];
   const logs: any[] = logData?.data || [];
+  const cooperatives: any[] = Array.isArray(coopsData) ? coopsData : (coopsData as any)?.data || [];
 
   const createMut = useMutation({
     mutationFn: (p: SitePayload) => sitesApi.create(p),
@@ -173,7 +190,7 @@ export default function SitesPage() {
         <div>
           <div className="pt">Sites, Regions & Cooperatives</div>
           <div className="ps" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <MapPin size={11} /> Gauteng · CoJ Metro · {regionGroups.length} Planning Regions · {sites.length} Sites · {W2W_COOPERATIVES.length} Cooperatives
+            <MapPin size={11} /> Gauteng · CoJ Metro · {regionGroups.length} Planning Regions · {sites.length} Sites · {cooperatives.length} Cooperatives
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -199,11 +216,11 @@ export default function SitesPage() {
             background: 'transparent', border: 'none', borderBottom: siteTab === 'coops' ? '3px solid var(--color-w2w)' : '3px solid transparent',
             color: siteTab === 'coops' ? 'var(--color-w2w)' : 'var(--color-text3)', transition: 'all 0.2s',
           }}
-        >🤝 Cooperatives ({W2W_COOPERATIVES.length})</button>
+        >🤝 Cooperatives ({cooperatives.length})</button>
       </div>
 
       {siteTab === 'coops' ? (
-        <CooperativesSection sites={sites} employees={employees} logs={logs} />
+        <CooperativesSection sites={sites} employees={employees} logs={logs} cooperatives={cooperatives} />
       ) : (
         <>
           {/* OHS Alert */}
@@ -256,7 +273,7 @@ export default function SitesPage() {
               {regionGroups.map((group) => {
                 const regionName = group.name;
                 const regionSites = group.sites;
-                const srCoops = W2W_COOPERATIVES.filter((co) => regionSites.find((s: any) => s.id === co.siteId || co.region === regionName));
+                const srCoops = cooperatives.filter((co: any) => regionSites.find((s: any) => s.id === co.siteId || co.region === regionName));
                 const srBens = regionSites.reduce((sum: number, s: any) => sum + (s.beneficiaries || 0), 0);
                 const srTons = regionSites.reduce((sum: number, s: any) => sum + (s.monthlyTonnage || 0), 0);
 
@@ -498,32 +515,20 @@ export default function SitesPage() {
 // ═══════════════════════════════════════════════════
 //  Cooperatives Section
 // ═══════════════════════════════════════════════════
-const W2W_COOPERATIVES = [
-  { id: 'COOP-001', name: 'Florida Lake Green Collective', siteId: 'SITE-001', region: 'Region C', focus: 'Plastics & Mixed Recyclables', mentor: 'SCM PMO' },
-  { id: 'COOP-002', name: 'Fleurhof Recyclers Cooperative', siteId: 'SITE-002', region: 'Region C', focus: 'Mixed Recyclables', mentor: 'Polyco' },
-  { id: 'COOP-003', name: 'Doornkop Waste Enterprise', siteId: 'SITE-003', region: 'Region C', focus: 'General Waste Sorting', mentor: 'SCM PMO' },
-  { id: 'COOP-004', name: 'Zandspruit Community Sorters', siteId: 'SITE-004', region: 'Region C', focus: 'Community Recycling', mentor: 'SCM PMO' },
-  { id: 'COOP-005', name: 'Newtown Recycle Cooperative', siteId: 'SITE-005', region: 'Region F', focus: 'Mixed Recyclables — inner city', mentor: 'Fibre Cycle' },
-  { id: 'COOP-006', name: 'Marshalltown Waste Pickers Coop', siteId: 'SITE-006', region: 'Region F', focus: 'Commercial Waste Sorting', mentor: 'Petco' },
-  { id: 'COOP-007', name: 'Naledi Community Collective', siteId: 'SITE-007', region: 'Region D', focus: 'Plastics Recovery', mentor: 'Petco' },
-  { id: 'COOP-008', name: 'Jabulani Rail Recyclers', siteId: 'SITE-008', region: 'Region D', focus: 'Mixed Recyclables — rail corridor', mentor: 'SCM PMO' },
-  { id: 'COOP-009', name: 'Jabulile Youth Recyclers', siteId: 'SITE-009', region: 'Region G', focus: 'Paper & Plastics', mentor: 'Fibre Cycle' },
-  { id: 'COOP-010', name: 'Sepona Park Waste Enterprise', siteId: 'SITE-010', region: 'Region G', focus: 'General Waste & Organics', mentor: 'SCM PMO' },
-  { id: 'COOP-011', name: 'Lenasia Recyclers Cooperative', siteId: 'SITE-011', region: 'Region G', focus: 'Mixed Recyclables — transport node', mentor: 'Polyco' },
-  { id: 'COOP-012', name: 'Zodiac School Community Coop', siteId: 'SITE-012', region: 'Region G', focus: 'Paper & Cardboard', mentor: 'Fibre Cycle' },
-  { id: 'COOP-013', name: 'Alice Street Sorters', siteId: 'SITE-013', region: 'Region G', focus: 'General Waste Sorting', mentor: 'SCM PMO' },
-  { id: 'COOP-014', name: 'Pikitup Garden Waste Coop', siteId: 'SITE-014', region: 'Region G', focus: 'Organic & Garden Waste', mentor: 'Circular Energy' },
-  { id: 'COOP-015', name: 'Freedom Park Waste Collective', siteId: 'SITE-015', region: 'Region G', focus: 'Residential Recycling', mentor: 'Petco' },
-];
 
-function CooperativesSection({ sites, employees, logs }: { sites: any[]; employees: any[]; logs: any[] }) {
-  // Load cooperatives from localStorage (seeded with defaults)
-  const [cooperatives, setCooperatives] = useState<any[]>(() => {
-    try {
-      const saved = localStorage.getItem('w2w_cooperatives');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return W2W_COOPERATIVES;
+function CooperativesSection({ sites, employees, logs, cooperatives }: { sites: any[]; employees: any[]; logs: any[]; cooperatives: any[] }) {
+  const qc = useQueryClient();
+  const mutCreate = useMutation({
+    mutationFn: cooperativesApi.create,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cooperatives'] }),
+  });
+  const mutUpdate = useMutation({
+    mutationFn: ({ id, payload }: { id: string, payload: any }) => cooperativesApi.update(id, payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cooperatives'] }),
+  });
+  const mutDelete = useMutation({
+    mutationFn: cooperativesApi.delete,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cooperatives'] }),
   });
 
   const [coopModal, setCoopModal] = useState<'add' | 'edit' | null>(null);
@@ -548,14 +553,8 @@ function CooperativesSection({ sites, employees, logs }: { sites: any[]; employe
   };
   const deleteCoop = (co: any) => {
     if (confirm(`Delete cooperative "${co.name}"?`)) {
-      saveCoops(cooperatives.filter((c: any) => c.id !== co.id));
+      mutDelete.mutate(co.id);
     }
-  };
-
-  // Persist cooperatives
-  const saveCoops = (coops: any[]) => {
-    setCooperatives(coops);
-    localStorage.setItem('w2w_cooperatives', JSON.stringify(coops));
   };
 
   const coopData = useMemo(() => {
@@ -580,23 +579,23 @@ function CooperativesSection({ sites, employees, logs }: { sites: any[]; employe
     if (!coopForm.siteId) { alert('Please assign a site'); return; }
     const selectedSite = sites.find((s: any) => s.id === coopForm.siteId);
     if (coopModal === 'edit' && editingCoopId) {
-      saveCoops(cooperatives.map((c: any) => c.id === editingCoopId ? {
-        ...c, name: coopForm.name, siteId: coopForm.siteId,
-        region: selectedSite?.region || coopForm.region || c.region,
-        focus: coopForm.focus, mentor: coopForm.mentor || coopForm.proPartner || c.mentor,
-        registration: coopForm.registration, stage: coopForm.stage,
-        proPartner: coopForm.proPartner, notes: coopForm.notes,
-      } : c));
+      mutUpdate.mutate({
+        id: editingCoopId, payload: {
+          name: coopForm.name, siteId: coopForm.siteId,
+          region: selectedSite?.region || coopForm.region || '',
+          focus: coopForm.focus, mentor: coopForm.mentor || coopForm.proPartner || '',
+          registration: coopForm.registration, stage: coopForm.stage,
+          proPartner: coopForm.proPartner, notes: coopForm.notes,
+        }
+      });
     } else {
-      const newCoop = {
-        id: 'COOP-' + Date.now().toString(36).toUpperCase(),
+      mutCreate.mutate({
         name: coopForm.name, siteId: coopForm.siteId,
         region: selectedSite?.region || coopForm.region || '',
         focus: coopForm.focus, mentor: coopForm.mentor || coopForm.proPartner || 'SCM PMO',
         registration: coopForm.registration, stage: coopForm.stage,
         proPartner: coopForm.proPartner, notes: coopForm.notes,
-      };
-      saveCoops([...cooperatives, newCoop]);
+      });
     }
     setCoopModal(null);
   };

@@ -36,6 +36,7 @@ export const authApi = {
   login: (data: LoginPayload) => api.post<AuthResponse>('/auth/login', data).then((r) => r.data),
   register: (data: RegisterPayload) => api.post<AuthResponse>('/auth/register', data).then((r) => r.data),
   me: () => api.get<AuthResponse['user']>('/auth/me').then((r) => r.data),
+  setupStatus: () => api.get<{ isSetupComplete: boolean }>('/auth/setup-status').then((r) => r.data),
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post('/auth/change-password', { currentPassword, newPassword }).then((r) => r.data),
   forgotPassword: (email: string) =>
@@ -177,10 +178,19 @@ export interface SitePayload {
   provinceId?: string;
   municipalityId?: string;
   subRegionId?: string;
+  depotId?: string | null;
+  currentSkipBinCount?: number | null;
+  gateFee?: number | null;
+  weighbridge?: string | null;
+  maxVehicleTonnage?: number | null;
+  acceptedMaterials?: string[];
+  metadata?: any;
 }
 
 export const sitesApi = {
-  list: () => api.get('/sites').then((r) => r.data),
+  list: (params?: Record<string, string>) =>
+    api.get<any[]>('/sites', { params }).then((r) => r.data),
+  get: (id: string) => api.get(`/sites/${id}`).then((r) => r.data),
   create: (data: SitePayload) => api.post('/sites', data).then((r) => r.data),
   update: (id: string, data: Partial<SitePayload>) => api.put(`/sites/${id}`, data).then((r) => r.data),
   delete: (id: string) => api.delete(`/sites/${id}`).then((r) => r.data),
@@ -446,4 +456,24 @@ export const deletionRequestsApi = {
     api.post('/deletion-requests', data).then((r) => r.data),
   updateStatus: (id: string, data: { status: string; notes?: string }) =>
     api.patch(`/deletion-requests/${id}/status`, data).then((r) => r.data),
+};
+
+// ═══════════════════════════════════════════════
+//  Depots API
+// ═══════════════════════════════════════════════
+export const depotsApi = {
+  list: (params?: Record<string, string>) => api.get<any[]>('/depots', { params }).then((r) => r.data),
+  create: (data: any) => api.post('/depots', data).then((r) => r.data),
+  update: (id: string, data: any) => api.put(`/depots/${id}`, data).then((r) => r.data),
+  delete: (id: string) => api.delete(`/depots/${id}`).then((r) => r.data),
+};
+
+// ═══════════════════════════════════════════════
+//  Cooperatives API
+// ═══════════════════════════════════════════════
+export const cooperativesApi = {
+  list: (params?: Record<string, string>) => api.get<any[]>('/cooperatives', { params }).then((r) => r.data),
+  create: (data: any) => api.post('/cooperatives', data).then((r) => r.data),
+  update: (id: string, data: any) => api.put(`/cooperatives/${id}`, data).then((r) => r.data),
+  delete: (id: string) => api.delete(`/cooperatives/${id}`).then((r) => r.data),
 };
