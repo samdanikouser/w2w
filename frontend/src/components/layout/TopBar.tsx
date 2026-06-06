@@ -10,7 +10,7 @@ const PAGE_TITLES: Record<string, string> = {
   dashboard: 'Dashboard',
   employees: 'Employees',
   'waste-logs': 'Waste Collection Logs',
-  'stock-variance': 'Stock Variance Report',
+
   'stock-register': 'Stock Register',
   'pl-register': 'P&L Entry Register',
   'epr-reports': 'Monthly EPR Reporting',
@@ -54,7 +54,7 @@ const PAGE_SUBTITLES: Record<string, string> = {
   'depot-scanner': 'Live QR intake',
   violations: 'Disciplinary register',
   'stock-register': 'PPE, consumables, equipment',
-  'stock-variance': 'Reconciliation report',
+
   profile: 'Personal info, notifications, security',
   'w2w-settings': 'Waste categories, training, payments, cost centers',
   'help-docs': 'Guides, FAQ, shortcuts & support',

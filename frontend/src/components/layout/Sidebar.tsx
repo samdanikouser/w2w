@@ -25,6 +25,7 @@ import {
   LogOut,
   DollarSign,
   Clock,
+  Warehouse,
 } from 'lucide-react';
 
 // Map icon name strings from moduleRegistry to actual React icon elements
@@ -50,6 +51,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   DollarSign: <DollarSign size={14} />,
   Clock: <Clock size={14} />,
   LogIn: <LogIn size={14} />,
+  Warehouse: <Warehouse size={14} />,
 };
 
 function avatarColor(id: string): string {
@@ -104,10 +106,9 @@ export default function Sidebar() {
     allowedIds = allowedIds.map((id) => id === 'settings' ? 'w2w-settings' : id);
   }
 
-  // Force allow facilities for now to prevent caching issues
-  if (!allowedIds.includes('facilities')) {
-    allowedIds.push('facilities');
-  }
+  // Force allow facilities and depots for now to prevent caching issues
+  if (!allowedIds.includes('facilities')) allowedIds.push('facilities');
+  if (!allowedIds.includes('depots')) allowedIds.push('depots');
 
   const filteredModules = ALL_MODULES.filter((m) => allowedIds.includes(m.id));
   const sections = buildSections(filteredModules);
@@ -151,6 +152,16 @@ export default function Sidebar() {
             </div>
           </div>
         </div>
+        {user.isDepotManager && user.depotName && (
+          <div style={{
+            marginTop: 8, padding: '4px 8px', borderRadius: 6,
+            background: 'rgba(0,200,150,0.15)', border: '1px solid rgba(0,200,150,0.25)',
+            display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: '#00c896',
+            fontWeight: 600,
+          }}>
+            <span>📍</span> {user.depotName}
+          </div>
+        )}
       </div>
 
 

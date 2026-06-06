@@ -4,6 +4,7 @@ import { stockItemsApi, sitesApi, employeesApi, type StockItemPayload } from '..
 import { Plus, X, Edit2, Trash2 } from 'lucide-react';
 import { StatCard, RowBtn } from './SitesPage';
 import { exportCsv } from '../utils/csv';
+import { usePermissions } from '../hooks/usePermissions';
 
 /* ── Local-storage helpers for Tools & Issue Log ── */
 const LS_TOOLS = 'w2w_tools';
@@ -36,17 +37,25 @@ const STATUS_BADGES: Record<string, string> = {
   OUT: 'badge br',
 };
 
-const EMPTY: StockItemPayload & { size?: string; unitCost?: number; supplier?: string; notes?: string } = {
+const EMPTY: StockItemPayload & {
+  size?: string; unitCost?: number; supplier?: string; notes?: string;
+  serial?: string; condition?: string; assignedTo?: string; assignedSite?: string;
+} = {
   code: '', item: '', category: 'PPE', uom: 'each', onHand: 0, reorderAt: 0, siteId: null,
   size: '', unitCost: 0, supplier: '', notes: '',
+  serial: '', condition: 'Good', assignedTo: '', assignedSite: '',
 };
 
-type TabKey = 'stock' | 'tools' | 'issued';
+const isToolCategory = (cat: string) =>
+  cat === 'Equipment' || cat === 'Tool/Equipment' || cat === 'Hand Tool' || cat === 'Power Tool' || cat === 'Safety Equipment';
+
+type TabKey = 'stock' | 'issued';
 
 export default function StockRegisterPage() {
   const qc = useQueryClient();
+  const { canCreate, canEdit, canDelete } = usePermissions();
   const [tab, setTab] = useState<TabKey>('stock');
-  const [modal, setModal] = useState<'add' | 'edit' | 'issue' | 'issueHeader' | 'restock' | 'addTool' | 'editTool' | null>(null);
+  const [modal, setModal] = useState<'add' | 'edit' | 'issue' | 'issueHeader' | 'restock' | null>(null);
   const [active, setActive] = useState<any>(null);
   const [form, setForm] = useState<typeof EMPTY>(EMPTY);
   const [issueForm, setIssueForm] = useState({ itemId: '', qty: 1, employeeId: '', date: today(), notes: '' });
@@ -78,6 +87,10 @@ export default function StockRegisterPage() {
     onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.'),
   });
 
+  /* ── Partition items into PPE vs Tool/Equipment ── */
+  const ppeItems = useMemo(() => allItems.filter((i: any) => !isToolCategory(i.category)), [allItems]);
+  const toolItems = useMemo(() => allItems.filter((i: any) => isToolCategory(i.category)), [allItems]);
+
   const lowStock = allItems.filter((s) => s.status === 'LOW' || s.status === 'OUT');
   const totalValue = allItems.reduce((s, i) => s + (i.onHand || 0) * ((i as any).unitCost || 0), 0);
 
@@ -89,6 +102,8 @@ export default function StockRegisterPage() {
       onHand: s.onHand, reorderAt: s.reorderAt, siteId: s.siteId || null,
       size: (s as any).size || '', unitCost: (s as any).unitCost || 0,
       supplier: (s as any).supplier || '', notes: (s as any).notes || '',
+      serial: (s as any).serial || '', condition: (s as any).condition || 'Good',
+      assignedTo: (s as any).assignedTo || '', assignedSite: (s as any).assignedSite || '',
     });
     setActive(s); setModal('edit');
   };
@@ -99,17 +114,13 @@ export default function StockRegisterPage() {
     setRestockForm({ qty: 0, supplier: (s as any).supplier || '', date: today(), unitCost: (s as any).unitCost || 0, notes: '' });
     setModal('restock');
   };
-  const openAddTool = () => {
-    setToolForm({ name: '', category: 'Tool/Equipment', serial: '', assignedTo: '', assignedSite: '', condition: 'Good', notes: '' });
-    setActive(null); setModal('addTool');
-  };
   const openEditTool = (t: Tool) => {
     setToolForm({ ...t });
     setActive(t); setModal('editTool');
   };
 
   const save = () => {
-    if (!form.code?.trim() || !form.item?.trim()) return;
+    if (!form.item?.trim()) return;
     if (modal === 'edit' && active) updateMut.mutate({ id: active.id, p: form });
     else createMut.mutate(form);
   };
@@ -163,30 +174,11 @@ export default function StockRegisterPage() {
     setModal(null);
   };
 
-  const submitTool = () => {
-    if (!toolForm.name?.trim()) return;
-    if (modal === 'editTool' && active) {
-      // Update existing tool
-      const updated = tools.map((t) => t.id === active.id ? { ...t, ...toolForm } as Tool : t);
-      setTools(updated);
-      saveTools(updated);
-    } else {
-      // Create new tool
-      const t: Tool = {
-        id: `TL-${Date.now().toString(36)}`,
-        name: toolForm.name || '',
-        category: toolForm.category || 'Tool/Equipment',
-        serial: toolForm.serial || '',
-        assignedTo: toolForm.assignedTo || '',
-        assignedSite: toolForm.assignedSite || '',
-        condition: toolForm.condition || 'Good',
-        issued: today(),
-        notes: toolForm.notes || '',
-      };
-      const updated = [...tools, t];
-      setTools(updated);
-      saveTools(updated);
-    }
+  const submitToolEdit = () => {
+    if (!toolForm.name?.trim() || !active) return;
+    const updated = tools.map((t) => t.id === active.id ? { ...t, ...toolForm } as Tool : t);
+    setTools(updated);
+    saveTools(updated);
     setModal(null);
   };
 
@@ -208,11 +200,10 @@ export default function StockRegisterPage() {
       <div className="ph">
         <div>
           <div className="pt">Stock Register</div>
-          <div className="ps">{allItems.length} PPE / uniform items · {tools.length} tools registered</div>
+          <div className="ps">{ppeItems.length} PPE items · {toolItems.length} tools & equipment</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary" onClick={openIssueHeader}>📤 Issue Stock</button>
-          <button className="btn btn-ghost" onClick={openAdd}><Plus size={13} /> Add Item</button>
+          {canCreate('stock-register') && <button className="btn btn-ghost" onClick={openAdd}><Plus size={13} /> Add Item</button>}
           <button className="btn btn-ghost" onClick={() => exportCsv('stock-register', allItems, [
             { key: 'item', label: 'Item' },
             { key: 'code', label: 'SKU' },
@@ -239,24 +230,16 @@ export default function StockRegisterPage() {
 
       {/* ── Stat Cards ── */}
       <div className="stats-grid">
-        <StatCard label="PPE & Uniforms" value={String(allItems.length)} sub="Stock-keeping units" icon="🧰" rail="sc-blue" color="var(--color-w2w)" />
-        <StatCard
-          label="Total Stock Value"
-          value={'R ' + Math.round(totalValue).toLocaleString('en-ZA')}
-          sub="On-hand × unit cost"
-          icon="💰"
-          rail="sc-green"
-          color="var(--color-green)"
-        />
+        <StatCard label="PPE & Uniforms" value={String(ppeItems.length)} sub="Stock-keeping units" icon="🧰" rail="sc-blue" color="var(--color-w2w)" />
         <StatCard label="Low Stock" value={String(lowStock.length)} sub="At or below reorder" icon="⚠️" rail="sc-red" color="var(--color-red)" />
-        <StatCard label="Tools Registered" value={String(tools.length)} sub="Equipment tracked" icon="🔧" rail="sc-amber" color="var(--color-amber)" />
+        <StatCard label="Tools & Equipment" value={String(toolItems.length)} sub="Equipment tracked" icon="🔧" rail="sc-amber" color="var(--color-amber)" />
+        <StatCard label="Total Issued" value={String(movements.reduce((s, m) => s + m.qty, 0))} sub="Items issued to date" icon="📦" rail="sc-green" color="var(--color-green)" />
       </div>
 
       {/* ── Tabs ── */}
       <div className="tabs mb14">
         {([
-          { key: 'stock' as TabKey, label: `🧰 PPE & Uniforms (${allItems.length})` },
-          { key: 'tools' as TabKey, label: `🔧 Tools & Equipment (${tools.length})` },
+          { key: 'stock' as TabKey, label: `🧰 PPE & Uniforms (${ppeItems.length}) / 🔧 Tools & Equipment (${toolItems.length})` },
           { key: 'issued' as TabKey, label: `📋 Issue Log (${movements.length})` },
         ]).map((t) => (
           <div
@@ -270,140 +253,158 @@ export default function StockRegisterPage() {
         ))}
       </div>
 
-      {/* ══ TAB 1: PPE & Uniforms ══ */}
+      {/* ══ TAB 1: Combined PPE & Uniforms / Tools & Equipment ══ */}
       {tab === 'stock' && (
-        <div className="card">
-          <div className="tw">
-            <table>
-              <thead>
-                <tr>
-                  <th>Item Name</th>
-                  <th>SKU</th>
-                  <th>Category</th>
-                  <th>Size</th>
-                  <th>In Stock</th>
-                  <th>Issued</th>
-                  <th>Reorder At</th>
-                  <th>Unit Cost</th>
-                  <th>Last Restocked</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allItems.length === 0 ? (
-                  <tr><td colSpan={11} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>
-                    No stock items yet. Click "Add Item" to register inventory.
-                  </td></tr>
-                ) : (
-                  allItems.map((s: any) => {
-                    const isLow = s.status === 'LOW' || s.status === 'OUT';
-                    const issued = movements.filter((m) => m.itemName === s.item).reduce((sum, m) => sum + m.qty, 0);
-                    return (
-                      <tr key={s.id} style={isLow ? { background: 'rgba(220,38,38,0.04)' } : undefined}>
-                        <td style={{ fontWeight: 600, fontSize: 12 }}>{s.item}</td>
-                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--color-text3)' }}>{s.code || '—'}</td>
-                        <td>
-                          <span className={`badge ${s.category === 'PPE' ? 'br' : 'bb'}`} style={{ fontSize: 9 }}>
-                            {s.category}
-                          </span>
-                        </td>
-                        <td style={{ fontSize: 11 }}>{(s as any).size || '—'}</td>
-                        <td style={{ fontWeight: 700, color: isLow ? 'var(--color-red)' : 'var(--color-green)' }}>
-                          {s.onHand}
-                        </td>
-                        <td style={{ fontSize: 11 }}>{issued}</td>
-                        <td style={{ fontSize: 11, color: isLow ? 'var(--color-red)' : 'var(--color-text3)' }}>
-                          {s.reorderAt}
-                        </td>
-                        <td style={{ fontSize: 11 }}>R{(s as any).unitCost || 0}</td>
-                        <td style={{ fontSize: 10, color: 'var(--color-text3)' }}>
-                          {s.updatedAt ? new Date(s.updatedAt).toLocaleDateString() : '—'}
-                        </td>
-                        <td>
-                          {isLow ? (
-                            <span className="badge br" style={{ fontSize: 9 }}>⚠ Low</span>
-                          ) : (
-                            <span className="badge bg" style={{ fontSize: 9 }}>OK</span>
-                          )}
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 4 }}>
-                            <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }} onClick={() => openIssue(s)}>Issue</button>
-                            <RowBtn title="Edit" onClick={() => openEdit(s)}><Edit2 size={13} /></RowBtn>
-                            <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }} onClick={() => openRestock(s)}>Restock</button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+        <>
+          {/* PPE & Uniforms Section — only non-tool categories */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="ch">
+              <div className="ct">🧰 PPE & Uniforms</div>
+              <div className="cs">{ppeItems.length} item{ppeItems.length !== 1 ? 's' : ''}</div>
+            </div>
+            <div className="tw">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Item Name</th>
+                    <th>SKU</th>
+                    <th>Category</th>
+                    <th>Size</th>
+                    <th>In Stock</th>
+                    <th>Issued</th>
+                    <th>Reorder At</th>
+                    <th>Last Restocked</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ppeItems.length === 0 ? (
+                    <tr><td colSpan={10} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>
+                      No PPE or uniform items yet. Click "Add Item" to register inventory.
+                    </td></tr>
+                  ) : (
+                    ppeItems.map((s: any) => {
+                      const isLow = s.status === 'LOW' || s.status === 'OUT';
+                      const issued = movements.filter((m) => m.itemName === s.item).reduce((sum, m) => sum + m.qty, 0);
+                      return (
+                        <tr key={s.id} style={isLow ? { background: 'rgba(220,38,38,0.04)' } : undefined}>
+                          <td style={{ fontWeight: 600, fontSize: 12 }}>{s.item}</td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--color-text3)' }}>{s.code || '—'}</td>
+                          <td>
+                            <span className={`badge ${s.category === 'PPE' ? 'br' : 'bb'}`} style={{ fontSize: 9 }}>
+                              {s.category}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: 11 }}>{(s as any).size || '—'}</td>
+                          <td style={{ fontWeight: 700, color: isLow ? 'var(--color-red)' : 'var(--color-green)' }}>
+                            {s.onHand}
+                          </td>
+                          <td style={{ fontSize: 11 }}>{issued}</td>
+                          <td style={{ fontSize: 11, color: isLow ? 'var(--color-red)' : 'var(--color-text3)' }}>
+                            {s.reorderAt}
+                          </td>
+                          <td style={{ fontSize: 10, color: 'var(--color-text3)' }}>
+                            {s.updatedAt ? new Date(s.updatedAt).toLocaleDateString() : '—'}
+                          </td>
+                          <td>
+                            {isLow ? (
+                              <span className="badge br" style={{ fontSize: 9 }}>⚠ Low</span>
+                            ) : (
+                              <span className="badge bg" style={{ fontSize: 9 }}>OK</span>
+                            )}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              {canEdit('stock-register') && <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }} onClick={() => openIssue(s)}>Issue</button>}
+                              {canEdit('stock-register') && <RowBtn title="Edit" onClick={() => openEdit(s)}><Edit2 size={13} /></RowBtn>}
+                              {canEdit('stock-register') && <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }} onClick={() => openRestock(s)}>Restock</button>}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+
+          {/* Tools & Equipment Section — same columns as PPE */}
+          <div className="card">
+            <div className="ch">
+              <div className="ct">🔧 Tools & Equipment</div>
+              <div className="cs">{toolItems.length} item{toolItems.length !== 1 ? 's' : ''} registered</div>
+            </div>
+            <div className="tw">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Item Name</th>
+                    <th>SKU</th>
+                    <th>Category</th>
+                    <th>Size</th>
+                    <th>In Stock</th>
+                    <th>Issued</th>
+                    <th>Reorder At</th>
+                    <th>Last Restocked</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {toolItems.length === 0 ? (
+                    <tr><td colSpan={10} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>
+                      No tools or equipment yet. Select a "Tools & Equipment" category when adding a new item.
+                    </td></tr>
+                  ) : (
+                    toolItems.map((s: any) => {
+                      const isLow = s.status === 'LOW' || s.status === 'OUT';
+                      const issued = movements.filter((m) => m.itemName === s.item).reduce((sum, m) => sum + m.qty, 0);
+                      return (
+                        <tr key={s.id} style={isLow ? { background: 'rgba(220,38,38,0.04)' } : undefined}>
+                          <td style={{ fontWeight: 600, fontSize: 12 }}>{s.item}</td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--color-text3)' }}>{s.code || '—'}</td>
+                          <td>
+                            <span className="badge bb" style={{ fontSize: 9 }}>{s.category}</span>
+                          </td>
+                          <td style={{ fontSize: 11 }}>{(s as any).size || '—'}</td>
+                          <td style={{ fontWeight: 700, color: isLow ? 'var(--color-red)' : 'var(--color-green)' }}>
+                            {s.onHand}
+                          </td>
+                          <td style={{ fontSize: 11 }}>{issued}</td>
+                          <td style={{ fontSize: 11, color: isLow ? 'var(--color-red)' : 'var(--color-text3)' }}>
+                            {s.reorderAt}
+                          </td>
+                          <td style={{ fontSize: 10, color: 'var(--color-text3)' }}>
+                            {s.updatedAt ? new Date(s.updatedAt).toLocaleDateString() : '—'}
+                          </td>
+                          <td>
+                            {isLow ? (
+                              <span className="badge br" style={{ fontSize: 9 }}>⚠ Low</span>
+                            ) : (
+                              <span className="badge bg" style={{ fontSize: 9 }}>OK</span>
+                            )}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }} onClick={() => openIssue(s)}>Issue</button>
+                              <RowBtn title="Edit" onClick={() => openEdit(s)}><Edit2 size={13} /></RowBtn>
+                              <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }} onClick={() => openRestock(s)}>Restock</button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
 
-      {/* ══ TAB 2: Tools & Equipment ══ */}
-      {tab === 'tools' && (
-        <div className="card">
-          <div className="ch">
-            <div className="ct">Tools & Equipment Register</div>
-            <button className="btn btn-accent btn-sm" onClick={openAddTool}><Plus size={12} /> Add Tool</button>
-          </div>
-          <div className="tw">
-            <table>
-              <thead>
-                <tr>
-                  <th>Item Name</th>
-                  <th>Category</th>
-                  <th>Serial No.</th>
-                  <th>Assigned To</th>
-                  <th>Site</th>
-                  <th>Condition</th>
-                  <th>Issue Date</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tools.length === 0 ? (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>
-                    No tools registered yet. Click "Add Tool" to register equipment.
-                  </td></tr>
-                ) : (
-                  tools.map((t) => (
-                    <tr key={t.id}>
-                      <td style={{ fontWeight: 600, fontSize: 12 }}>{t.name}</td>
-                      <td style={{ fontSize: 11 }}>{t.category}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--color-text3)' }}>{t.serial || '—'}</td>
-                      <td style={{ fontSize: 11 }}>
-                        {t.assignedTo ? empName(t.assignedTo) : <span style={{ color: 'var(--color-text3)' }}>Unassigned</span>}
-                      </td>
-                      <td style={{ fontSize: 11 }}>{t.assignedSite ? siteName(t.assignedSite) : '—'}</td>
-                      <td>
-                        <span className={`badge ${t.condition === 'Good' ? 'bg' : t.condition === 'Fair' ? 'ba' : 'br'}`} style={{ fontSize: 9 }}>
-                          {t.condition || '—'}
-                        </span>
-                      </td>
-                      <td style={{ fontSize: 10, color: 'var(--color-text3)' }}>{t.issued || '—'}</td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <RowBtn title="Edit" onClick={() => openEditTool(t)}><Edit2 size={13} /></RowBtn>
-                          <RowBtn title="Delete" danger onClick={() => { if (confirm(`Delete "${t.name}"?`)) removeTool(t.id); }}>
-                            <Trash2 size={13} />
-                          </RowBtn>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ══ TAB 3: Issue Log ══ */}
+      {/* ══ TAB 2: Issue Log ══ */}
       {tab === 'issued' && (
         <div className="card">
           <div className="ch">
@@ -449,7 +450,7 @@ export default function StockRegisterPage() {
 
       {/* ══ MODALS ══ */}
 
-      {/* Add / Edit Item */}
+      {/* Add / Edit Item — with conditional Tool/Equipment fields */}
       {(modal === 'add' || modal === 'edit') && (
         <div className="modal-ov open" onClick={() => setModal(null)}>
           <div className="modal" style={{ width: 720 }} onClick={(e) => e.stopPropagation()}>
@@ -463,15 +464,24 @@ export default function StockRegisterPage() {
                   <input className="fc" value={form.item} onChange={(e) => setForm({ ...form, item: e.target.value })} placeholder="e.g. Reflective Overall" /></div>
                 <div className="fg"><label className="fl">Category</label>
                   <select className="fc" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                    <option value="PPE">PPE</option>
-                    <option value="Uniform">Uniform</option>
-                    <option value="Consumable">Consumable</option>
-                    <option value="Equipment">Equipment</option>
+                    <optgroup label="PPE & Uniforms">
+                      <option value="PPE">PPE</option>
+                      <option value="Uniform">Uniform</option>
+                      <option value="Consumable">Consumable</option>
+                    </optgroup>
+                    <optgroup label="Tools & Equipment">
+                      <option value="Tool/Equipment">Tool / Equipment</option>
+                      <option value="Hand Tool">Hand Tool</option>
+                      <option value="Power Tool">Power Tool</option>
+                      <option value="Safety Equipment">Safety Equipment</option>
+                    </optgroup>
                   </select></div>
                 <div className="fg"><label className="fl">SKU / Code</label>
                   <input className="fc" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. PPE-VEST-M" /></div>
-                <div className="fg"><label className="fl">Size</label>
-                  <input className="fc" value={form.size || ''} onChange={(e) => setForm({ ...form, size: e.target.value })} placeholder="S / M / L / XL or N/A" /></div>
+                {!isToolCategory(form.category) && (
+                  <div className="fg"><label className="fl">Size</label>
+                    <input className="fc" value={form.size || ''} onChange={(e) => setForm({ ...form, size: e.target.value })} placeholder="S / M / L / XL or N/A" /></div>
+                )}
                 <div className="fg"><label className="fl">Qty in Stock</label>
                   <input className="fc" type="number" value={form.onHand ?? 0} min={0}
                     onChange={(e) => setForm({ ...form, onHand: parseFloat(e.target.value) || 0 })} /></div>
@@ -483,6 +493,38 @@ export default function StockRegisterPage() {
                     onChange={(e) => setForm({ ...form, unitCost: parseFloat(e.target.value) || 0 })} /></div>
                 <div className="fg"><label className="fl">Supplier</label>
                   <input className="fc" value={form.supplier || ''} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="Supplier name" /></div>
+
+                {/* ── Tool / Equipment specific fields ── */}
+                {isToolCategory(form.category) && (
+                  <>
+                    <div className="full" style={{ borderTop: '1px solid var(--color-border)', paddingTop: 14, marginTop: 4 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>
+                        🔧 Tool / Equipment Details
+                      </div>
+                    </div>
+                    <div className="fg"><label className="fl">Serial No.</label>
+                      <input className="fc" value={form.serial || ''} onChange={(e) => setForm({ ...form, serial: e.target.value })} placeholder="SN-XXX" /></div>
+                    <div className="fg"><label className="fl">Condition</label>
+                      <select className="fc" value={form.condition || 'Good'} onChange={(e) => setForm({ ...form, condition: e.target.value })}>
+                        <option value="Good">Good</option>
+                        <option value="Fair">Fair</option>
+                        <option value="Poor">Poor</option>
+                      </select></div>
+                    <div className="fg"><label className="fl">Assign To (Employee)</label>
+                      <select className="fc" value={form.assignedTo || ''} onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}>
+                        <option value="">Unassigned</option>
+                        {employees.filter((e: any) => e.status === 'ACTIVE').map((e: any) => (
+                          <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>
+                        ))}
+                      </select></div>
+                    <div className="fg"><label className="fl">Site</label>
+                      <select className="fc" value={form.assignedSite || ''} onChange={(e) => setForm({ ...form, assignedSite: e.target.value })}>
+                        <option value="">— None —</option>
+                        {sites.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select></div>
+                  </>
+                )}
+
                 <div className="full"><div className="fg"><label className="fl">Notes</label>
                   <input className="fc" value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional notes" /></div></div>
               </div>
@@ -645,56 +687,6 @@ export default function StockRegisterPage() {
         </div>
       )}
 
-      {/* Add / Edit Tool Modal */}
-      {(modal === 'addTool' || modal === 'editTool') && (
-        <div className="modal-ov open" onClick={() => setModal(null)}>
-          <div className="modal" style={{ width: 620 }} onClick={(e) => e.stopPropagation()}>
-            <div className="mh">
-              <span className="mt">{modal === 'editTool' ? `Edit — ${toolForm.name || ''}` : 'Register Tool / Equipment'}</span>
-              <button onClick={() => setModal(null)} className="mc"><X size={15} /></button>
-            </div>
-            <div className="mb">
-              <div className="fgrid">
-                <div className="fg"><label className="fl">Item Name <span className="req">*</span></label>
-                  <input className="fc" value={toolForm.name || ''} onChange={(e) => setToolForm({ ...toolForm, name: e.target.value })} placeholder="e.g. Grabber Tool" /></div>
-                <div className="fg"><label className="fl">Category</label>
-                  <select className="fc" value={toolForm.category || 'Tool/Equipment'} onChange={(e) => setToolForm({ ...toolForm, category: e.target.value })}>
-                    <option value="Tool/Equipment">Tool / Equipment</option>
-                    <option value="Hand Tool">Hand Tool</option>
-                    <option value="Power Tool">Power Tool</option>
-                    <option value="Safety Equipment">Safety Equipment</option>
-                  </select></div>
-                <div className="fg"><label className="fl">Serial No.</label>
-                  <input className="fc" value={toolForm.serial || ''} onChange={(e) => setToolForm({ ...toolForm, serial: e.target.value })} placeholder="SN-XXX" /></div>
-                <div className="fg"><label className="fl">Condition</label>
-                  <select className="fc" value={toolForm.condition || 'Good'} onChange={(e) => setToolForm({ ...toolForm, condition: e.target.value })}>
-                    <option value="Good">Good</option>
-                    <option value="Fair">Fair</option>
-                    <option value="Poor">Poor</option>
-                  </select></div>
-                <div className="fg"><label className="fl">Assign To (Employee)</label>
-                  <select className="fc" value={toolForm.assignedTo || ''} onChange={(e) => setToolForm({ ...toolForm, assignedTo: e.target.value })}>
-                    <option value="">Unassigned</option>
-                    {employees.filter((e: any) => e.status === 'ACTIVE').map((e: any) => (
-                      <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>
-                    ))}
-                  </select></div>
-                <div className="fg"><label className="fl">Site</label>
-                  <select className="fc" value={toolForm.assignedSite || ''} onChange={(e) => setToolForm({ ...toolForm, assignedSite: e.target.value })}>
-                    <option value="">— None —</option>
-                    {sites.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select></div>
-                <div className="full"><div className="fg"><label className="fl">Notes</label>
-                  <input className="fc" value={toolForm.notes || ''} onChange={(e) => setToolForm({ ...toolForm, notes: e.target.value })} placeholder="Optional" /></div></div>
-              </div>
-            </div>
-            <div className="mf">
-              <button className="btn btn-ghost" onClick={() => setModal(null)}>Cancel</button>
-              <button className="btn btn-primary" onClick={submitTool}>{modal === 'editTool' ? 'Save' : 'Add Tool'}</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

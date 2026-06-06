@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { violationsApi, employeesApi, type ViolationPayload } from '../api/endpoints';
 import { Plus, X } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
+import { usePermissions } from '../hooks/usePermissions';
 
 /* ── Severity mappings ───────────────────────────── */
 const SEVERITY_LABELS: Record<string, string> = {
@@ -119,6 +120,7 @@ const EMPTY_FORM: WarningForm = {
    ════════════════════════════════════════════════════ */
 export default function ViolationsPage() {
   const qc = useQueryClient();
+  const { canCreate, canEdit } = usePermissions();
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'super_admin' || user?.role === 'site_admin';
 
@@ -186,7 +188,7 @@ export default function ViolationsPage() {
           <div className="pt">Warnings &amp; Violations</div>
           <div className="ps">{allViolations.length} record{allViolations.length === 1 ? '' : 's'} · {openViolations.length} open</div>
         </div>
-        <button className="btn btn-accent" onClick={openIssue}><Plus size={13} /> Issue Warning</button>
+        {canCreate('violations') && <button className="btn btn-accent" onClick={openIssue}><Plus size={13} /> Issue Warning</button>}
       </div>
 
       {/* ── Open Violations Cards ── */}

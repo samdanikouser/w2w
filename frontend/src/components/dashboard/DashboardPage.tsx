@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { employeesApi, wasteLogsApi, sitesApi, wasteTypesApi, transactionsApi } from '../../api/endpoints';
+import { useAuthStore } from '../../stores/authStore';
 
 const TABS = [
   { id: 'performance', label: '👷 Employee Performance' },
@@ -59,6 +60,7 @@ function avatarColor(id: string): string {
 }
 
 export default function DashboardPage() {
+  const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('performance');
   const [period, setPeriod] = useState<Period>('all');
   const [fromDate, setFromDate] = useState('');
@@ -123,16 +125,17 @@ export default function DashboardPage() {
   // ── KPI numbers ──
   const totalKg = filteredLogs.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
   const totalTonnes = totalKg / 1000;
-  const totalValue = filteredLogs.reduce((s, l) => s + (Number(l.totalValue) || 0), 0);
+  const totalValue = filteredLogs.reduce((s, l) => {
+    const tv = Number(l.totalValue) || 0;
+    if (tv > 0) return s + tv;
+    // Compute from qty × price if totalValue is 0
+    return s + ((Number(l.quantity) || 0) * (Number(l.pricePerUnit) || 0));
+  }, 0);
   const monthLogs = logs.filter((l: any) => l.date?.startsWith(thisMonthKey));
   const monthKg = monthLogs.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
 
   const activeSites = sites.filter((s: any) => (s.status || '').toLowerCase() === 'active').length || sites.length;
-  const activeCollectors = employees.filter(
-    (e: any) =>
-      (e.status || '').toLowerCase() === 'active' &&
-      ((e.role || '').toLowerCase().includes('collect') || (e.systemRole || '').toLowerCase() === 'field')
-  ).length;
+  const activeEmployees = employees.filter((e: any) => (e.status || '').toUpperCase() === 'ACTIVE').length;
 
   const setPeriodAndReset = (p: Period) => {
     setPeriod(p);
@@ -148,8 +151,17 @@ export default function DashboardPage() {
       {/* ── Page header ── */}
       <div className="ph">
         <div>
-          <div className="pt">Dashboard</div>
-          <div className="ps">Programme-wide view</div>
+          <div className="pt">
+            Dashboard
+            {user?.isDepotManager && user.depotName && (
+              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-w2w)', marginLeft: 8 }}>
+                — {user.depotName}
+              </span>
+            )}
+          </div>
+          <div className="ps">
+            {user?.isDepotManager ? `Showing data for ${user.depotName} and its sites` : 'Programme-wide view'}
+          </div>
         </div>
       </div>
 
@@ -164,14 +176,14 @@ export default function DashboardPage() {
         />
         <StatCard
           label="This Month"
-          value={monthKg >= 1000 ? (monthKg / 1000).toFixed(2) + 't' : monthKg.toLocaleString() + ' kg'}
+          value={(monthKg / 1000).toFixed(2) + 't'}
           sub={`${monthLogs.length} ${monthLogs.length === 1 ? 'delivery' : 'deliveries'} in ${thisMonthKey}`}
           icon="📦"
           rail="sc-green"
         />
         <StatCard
-          label="Active Collectors"
-          value={String(activeCollectors || employees.length)}
+          label="Active Employees"
+          value={String(activeEmployees)}
           sub={`Across ${activeSites || sites.length} site${(activeSites || sites.length) === 1 ? '' : 's'}`}
           icon="👷"
           rail="sc-purple"
@@ -268,7 +280,7 @@ export default function DashboardPage() {
           totalKg={totalKg}
           totalValue={totalValue}
           deliveries={filteredLogs.length}
-          collectors={activeCollectors}
+          collectors={activeEmployees}
         />
       )}
     </div>
@@ -512,14 +524,14 @@ function TonsTab({
     const map = new Map<string, { id: string; name: string; colour: string; kg: number; rev: number; count: number }>();
     logs.forEach((l: any) => {
       const t = typeById[l.wasteTypeId] || {};
-      const id = l.wasteTypeId || l.wasteTypeName || 'unknown';
       const name = t.name || l.wasteTypeName || 'Unknown';
+      const key = name.trim().toLowerCase();
       const colour = t.colour || '#7a98ab';
-      const row = map.get(id) || { id, name, colour, kg: 0, rev: 0, count: 0 };
+      const row = map.get(key) || { id: key, name, colour, kg: 0, rev: 0, count: 0 };
       row.kg += Number(l.quantity) || 0;
       row.rev += Number(l.totalValue) || 0;
       row.count += 1;
-      map.set(id, row);
+      map.set(key, row);
     });
     return Array.from(map.values()).sort((a, b) => b.kg - a.kg);
   }, [logs, wasteTypes]);

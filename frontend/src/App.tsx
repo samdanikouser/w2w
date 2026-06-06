@@ -26,7 +26,7 @@ import DemographicsReportPage from './pages/DemographicsReportPage';
 import AttendanceReportPage from './pages/AttendanceReportPage';
 import PLReportPage from './pages/PLReportPage';
 import StockRegisterPage from './pages/StockRegisterPage';
-import StockVariancePage from './pages/StockVariancePage';
+
 import DepotScannerPage from './pages/DepotScannerPage';
 import AuditLogPage from './pages/AuditLogPage';
 import W2WSettingsPage from './pages/W2WSettingsPage';
@@ -107,7 +107,7 @@ function App() {
       case 'check-in-out': return <CheckInOutPage />;
       case 'beneficiary': return <BeneficiaryPage />;
       case 'stock-register': return <StockRegisterPage />;
-      case 'stock-variance': return <StockVariancePage />;
+
       case 'vehicles': return <VehiclesPage />;
       case 'depots': return <DepotsPage />;
       case 'depot-scanner': return <DepotScannerPage />;

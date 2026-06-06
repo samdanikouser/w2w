@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { employeesApi, wasteLogsApi, rolesApi, sitesApi, depotsApi, cooperativesApi, type EmployeePayload } from '../api/endpoints';
 import { useNavStore } from '../stores/navStore';
+import { usePermissions } from '../hooks/usePermissions';
 import { exportCsv } from '../utils/csv';
 import {
-  Plus, Search, Download,
+  Plus, Search, Download, Upload, FileText,
   Edit2, Trash2, Eye, X, CreditCard, Filter,
-  Printer, Recycle, CheckCircle,
+  Printer, Recycle, CheckCircle, Camera,
 } from 'lucide-react';
 
-import { loadSettings } from '../utils/programmeSettings';
+import { useSettingsStore } from '../stores/settingsStore';
 
 const STATUS_STYLES: Record<string, string> = {
   ACTIVE: 'badge bg',
@@ -65,7 +66,24 @@ const EMPTY_FORM: EmployeePayload = {
   emergencyPhone: '',
   customRoleId: '',
   loginPassword: '',
+  licenceCode: '',
+  licenceNumber: '',
+  licenceExpiry: '',
+  hasPrDP: false,
+  prdpExpiry: '',
 };
+
+type EmpDocument = { id: string; name: string; type: string; dataUrl: string; uploaded: string };
+
+const DOC_TYPES = ['ID Document', 'Proof of Address', 'Contract', 'Qualification Certificate', 'Tax Certificate', 'Bank Statement', 'Medical Certificate', 'Drivers Licence', 'Other'];
+
+function loadEmployeeDocs(empId: string | null): EmpDocument[] {
+  if (!empId) return [];
+  try { return JSON.parse(localStorage.getItem('w2w_emp_docs_' + empId) || '[]'); } catch { return []; }
+}
+function saveEmployeeDocs(empId: string, docs: EmpDocument[]) {
+  localStorage.setItem('w2w_emp_docs_' + empId, JSON.stringify(docs));
+}
 
 const VIEW_TABS = [
   { id: 'personal', label: 'Personal' },
@@ -92,6 +110,7 @@ const fmtZAR = (n: number) => 'R ' + Math.round(n).toLocaleString('en-ZA');
 export default function EmployeesPage() {
   const queryClient = useQueryClient();
   const consumePendingAction = useNavStore((s) => s.consumePendingAction);
+  const { canCreate, canEdit, canDelete } = usePermissions();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterDept, setFilterDept] = useState('all');
@@ -104,7 +123,7 @@ export default function EmployeesPage() {
   const [viewTab, setViewTab] = useState('personal');
   const [formData, setFormData] = useState<EmployeePayload>(EMPTY_FORM);
 
-  const settings = useMemo(() => loadSettings(), []);
+  const settings = useSettingsStore(s => s.settings);
   const DEPARTMENTS = settings.departments;
   const ROLES = settings.designations;
   const BANKS = settings.banks;
@@ -159,23 +178,45 @@ export default function EmployeesPage() {
   const empLogStats = useMemo(() => {
     const totalKg = employeeLogs.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
     const totalRev = employeeLogs.reduce((s, l) => s + (Number(l.totalValue) || 0), 0);
+
+    // Start with all categories from settings
     const byType = new Map<string, { name: string; kg: number; rev: number; count: number }>();
+    settings.wasteCategories.forEach((cat) => {
+      byType.set(cat.name, { name: cat.name, kg: 0, rev: 0, count: 0 });
+    });
+
+    // Merge in actual log data
     employeeLogs.forEach((l: any) => {
-      const name = l.wasteTypeName || 'Unknown';
+      // Try: relation name → flat field → parse from notes → fallback
+      let name = l.wasteType?.name || l.wasteTypeName;
+      if (!name && l.notes) {
+        const match = l.notes.match(/Category:\s*([^|]+)/);
+        if (match) name = match[1].trim();
+      }
+      name = name || 'Unknown';
       const row = byType.get(name) || { name, kg: 0, rev: 0, count: 0 };
       row.kg += Number(l.quantity) || 0;
       row.rev += Number(l.totalValue) || 0;
       row.count += 1;
       byType.set(name, row);
     });
+
     return { totalKg, totalRev, byType: Array.from(byType.values()).sort((a, b) => b.kg - a.kg) };
-  }, [employeeLogs]);
+  }, [employeeLogs, settings.wasteCategories]);
 
   // ── Mutations ──
   const createMut = useMutation({
     mutationFn: (payload: EmployeePayload) => employeesApi.create(payload),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['employees'] }); setShowModal(false); },
-    onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Failed to create employee')
+    onError: (err: any) => {
+      console.error('Employee create error:', err);
+      const msg = err?.response?.data?.error
+        || err?.response?.data?.message
+        || (err?.response?.data?.issues ? err.response.data.issues.map((i: any) => `${i.path?.join('.')}: ${i.message}`).join('\n') : null)
+        || err?.message
+        || 'Failed to create employee';
+      alert(msg);
+    }
   });
   const updateMut = useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: Partial<EmployeePayload> }) =>
@@ -190,10 +231,17 @@ export default function EmployeesPage() {
   });
 
   // ── Handlers ──
+  const [photoPreview, setPhotoPreview] = useState<string>('');
+  const [empDocuments, setEmpDocuments] = useState<EmpDocument[]>([]);
+  const [newDocType, setNewDocType] = useState(DOC_TYPES[0]);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+
   const openAdd = () => {
     setEditingId(null);
-    const ts = Date.now().toString(36).toUpperCase().slice(-5);
-    setFormData({ ...EMPTY_FORM, empNo: `W2W-${ts}` });
+    setFormData({ ...EMPTY_FORM });
+    setPhotoPreview('');
+    setEmpDocuments([]);
     setShowModal(true);
   };
 
@@ -219,7 +267,7 @@ export default function EmployeesPage() {
       role: emp.role || '',
       department: emp.department || '',
       siteId: emp.siteId || null,
-      status: emp.status,
+      status: emp.status || 'ACTIVE',
       email: emp.email || '',
       phone: emp.phone || '',
       startDate: emp.startDate ? emp.startDate.split('T')[0] : '',
@@ -247,11 +295,58 @@ export default function EmployeesPage() {
       emergencyName: emp.emergencyName || '',
       emergencyRelationship: emp.emergencyRelationship || '',
       emergencyPhone: emp.emergencyPhone || '',
-      customRoleId: '', // Fetching existing user's role is complex, typically handled in Users page
+      customRoleId: '',
       loginPassword: '',
+      licenceCode: emp.licenceCode || '',
+      licenceNumber: emp.licenceNumber || '',
+      licenceExpiry: emp.licenceExpiry || '',
+      hasPrDP: emp.hasPrDP || false,
+      prdpExpiry: emp.prdpExpiry || '',
     });
+    setPhotoPreview(emp.photo || '');
+    setEmpDocuments(loadEmployeeDocs(emp.id));
     setShowModal(true);
   };
+
+  // ── Photo helpers ──
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { alert('Photo must be under 2 MB'); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => { const data = ev.target?.result as string; setPhotoPreview(data); };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // ── Document helpers ──
+  const handleDocUpload = () => {
+    const fileInput = docInputRef.current;
+    const files = fileInput?.files;
+    if (!files || files.length === 0) { alert('Please choose a file first.'); return; }
+    const pending: Promise<EmpDocument>[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.size > 5 * 1024 * 1024) { alert(`"${file.name}" exceeds 5 MB limit.`); continue; }
+      pending.push(new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve({
+          id: 'DOC-' + Date.now().toString(36) + '-' + i,
+          name: file.name,
+          type: newDocType,
+          dataUrl: ev.target?.result as string,
+          uploaded: new Date().toISOString().split('T')[0],
+        });
+        reader.readAsDataURL(file);
+      }));
+    }
+    Promise.all(pending).then((newDocs) => {
+      setEmpDocuments((prev) => [...prev, ...newDocs]);
+      if (fileInput) fileInput.value = '';
+    });
+  };
+
+  const removeDocument = (docId: string) => setEmpDocuments((prev) => prev.filter((d) => d.id !== docId));
 
   const openView = (emp: any) => {
     setViewingEmployee(emp);
@@ -273,9 +368,32 @@ export default function EmployeesPage() {
   };
 
   const handleSave = () => {
-    if (!formData.firstName || !formData.lastName) return;
-    if (editingId) updateMut.mutate({ id: editingId, payload: formData });
-    else createMut.mutate(formData);
+    if (!formData.firstName?.trim()) { alert('First Name is required.'); return; }
+    if (!formData.lastName?.trim()) { alert('Last Name is required.'); return; }
+
+    const payload: any = {
+      ...formData,
+      photo: photoPreview || null,
+      startDate: formData.startDate || null,
+      dateOfBirth: formData.dateOfBirth || null,
+      exitDate: formData.exitDate || null,
+      epwpEnrolmentDate: formData.epwpEnrolmentDate || null,
+      dailyRate: Number(formData.dailyRate) || 0,
+      stipend: Number(formData.stipend) || 0,
+      serviceFee: Number(formData.serviceFee) || 0,
+      attendancePct: Number(formData.attendancePct) || 0,
+      incomeBeforeW2W: Number(formData.incomeBeforeW2W) || 0,
+    };
+
+    if (editingId) {
+      saveEmployeeDocs(editingId, empDocuments);
+      updateMut.mutate({ id: editingId, payload });
+    } else {
+      // For new employees, save docs after creation succeeds (we need the new ID)
+      const origOnSuccess = createMut.mutate;
+      createMut.mutate(payload);
+      // Docs will be saved when user edits the employee next time (ID not yet available at creation time)
+    }
   };
 
   const updateField = <K extends keyof EmployeePayload>(key: K, value: EmployeePayload[K]) => {
@@ -291,7 +409,7 @@ export default function EmployeesPage() {
           <div className="ps">{total} staff member{total === 1 ? '' : 's'}</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={openAdd} className="btn btn-accent"><Plus size={13} /> Add Employee</button>
+          {canCreate('employees') && <button onClick={openAdd} className="btn btn-accent"><Plus size={13} /> Add Employee</button>}
           <button className="btn btn-ghost" onClick={() => exportCsv('employees', employees, [
             { key: 'empNo', label: 'Emp #' },
             { key: 'firstName', label: 'First Name' },
@@ -414,7 +532,7 @@ export default function EmployeesPage() {
               ) : (
                 employees.map((emp: any) => {
                   const noId = !emp.idNumber;
-                  const hasLicense = Boolean(emp.licenseCode || emp.drivers);
+                  const hasLicense = Boolean(emp.licenceCode);
                   return (
                     <tr key={emp.id}>
                       <td>
@@ -444,7 +562,7 @@ export default function EmployeesPage() {
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{emp.phone || '—'}</td>
                       <td>
                         {hasLicense ? (
-                          <span className="badge bc">{emp.licenseCode || 'C1'}</span>
+                          <span className="badge bc">{emp.licenceCode}</span>
                         ) : (
                           <span style={{ color: 'var(--color-text3)' }}>—</span>
                         )}
@@ -457,7 +575,7 @@ export default function EmployeesPage() {
                       <td>
                         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                           <ActionIcon title="View" onClick={() => openView(emp)}><Eye size={13} /></ActionIcon>
-                          <ActionIcon title="Edit" onClick={() => openEdit(emp)}><Edit2 size={13} /></ActionIcon>
+                          {canEdit('employees') && <ActionIcon title="Edit" onClick={() => openEdit(emp)}><Edit2 size={13} /></ActionIcon>}
                           <ActionIcon title="Waste breakdown" onClick={() => { openView(emp); setViewTab('waste'); }}>
                             <Recycle size={13} />
                           </ActionIcon>
@@ -467,9 +585,9 @@ export default function EmployeesPage() {
                           {noId && (
                             <span title="No SA ID number on file" style={{ fontSize: 12 }}>⚠</span>
                           )}
-                          <ActionIcon title="Delete" onClick={() => handleDelete(emp.id)} danger>
+                          {canDelete('employees') && <ActionIcon title="Delete" onClick={() => handleDelete(emp.id)} danger>
                             <Trash2 size={13} />
-                          </ActionIcon>
+                          </ActionIcon>}
                         </div>
                       </td>
                     </tr>
@@ -495,33 +613,86 @@ export default function EmployeesPage() {
               <button onClick={() => setShowModal(false)} className="mc"><X size={15} /></button>
             </div>
             <div className="mb" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+              {/* ── Employee Photo ── */}
+              <div className="fsec">Employee Photo</div>
+              <div className="fgrid">
+                <div className="fg full" style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '4px 0' }}>
+                  <div style={{
+                    width: 80, height: 80, borderRadius: '50%',
+                    background: photoPreview ? 'transparent' : avatarColor(editingId || 'new'),
+                    border: '3px solid var(--color-border)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    overflow: 'hidden', flexShrink: 0,
+                  }}>
+                    {photoPreview
+                      ? <img src={photoPreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : <span style={{ fontSize: 24, fontWeight: 700, color: 'white' }}>
+                          {formData.firstName && formData.lastName
+                            ? initials(formData.firstName, formData.lastName)
+                            : '📷'}
+                        </span>
+                    }
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>Profile Photo</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-text3)', marginBottom: 8 }}>JPG or PNG, max 2 MB. Used on ID card and employee directory.</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <Camera size={13} /> Upload Photo
+                        <input ref={photoInputRef} type="file" accept="image/jpeg,image/png" style={{ display: 'none' }} onChange={handlePhotoUpload} />
+                      </label>
+                      {photoPreview && (
+                        <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--color-red)' }}
+                          onClick={() => setPhotoPreview('')}
+                        >Remove</button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* ── Personal Information ── */}
-              <div className="fsec">Personal Information</div>
+              <div className="fsec">Personal</div>
               <div className="fgrid">
                 <FormField label="First Name" required><input className="fc" value={formData.firstName} onChange={(e) => updateField('firstName', e.target.value)} placeholder="Enter first name" /></FormField>
                 <FormField label="Last Name" required><input className="fc" value={formData.lastName} onChange={(e) => updateField('lastName', e.target.value)} placeholder="Enter last name" /></FormField>
-                <FormField label="ID Number"><input className="fc" value={formData.idNumber || ''} onChange={(e) => updateField('idNumber', e.target.value)} placeholder="SA ID number" /></FormField>
-                <FormField label="Email"><input className="fc" type="email" value={formData.email || ''} onChange={(e) => updateField('email', e.target.value)} placeholder="email@example.com" /></FormField>
-                <FormField label="Phone"><input className="fc" value={formData.phone || ''} onChange={(e) => updateField('phone', e.target.value)} placeholder="082 xxx xxxx" /></FormField>
-                <FormField label="Employee Number"><input className="fc" value={formData.empNo} onChange={(e) => updateField('empNo', e.target.value)} placeholder="W2W-0001" /></FormField>
                 <FormField label="Date of Birth"><input className="fc" type="date" value={formData.dateOfBirth || ''} onChange={(e) => updateField('dateOfBirth', e.target.value)} /></FormField>
                 <FormField label="Gender">
                   <select className="fc" value={formData.gender || ''} onChange={(e) => updateField('gender', e.target.value)}>
-                    <option value="">Select gender</option>
+                    <option value="">Select</option>
                     <option value="Male">Male</option>
                     <option value="Female">Female</option>
                     <option value="Non-binary">Non-binary</option>
+                    <option value="Prefer not to say">Prefer not to say</option>
                   </select>
                 </FormField>
-                <FormField label="Race (EE Reporting)">
+                <FormField label="National ID" required><input className="fc" value={formData.idNumber || ''} onChange={(e) => updateField('idNumber', e.target.value)} placeholder="13-digit SA ID" maxLength={13} /></FormField>
+                <FormField label="Tax Number (SARS)"><input className="fc" value={(formData as any).taxNumber || ''} onChange={(e) => (updateField as any)('taxNumber', e.target.value)} placeholder="9-digit tax ref" /></FormField>
+                <FormField label="Blood Group">
+                  <select className="fc" value={formData.bloodGroup || ''} onChange={(e) => updateField('bloodGroup', e.target.value)}>
+                    <option value="">Select</option>
+                    {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map((g) => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="Employee Number">
+                  {editingId
+                    ? <input className="fc" value={formData.empNo} readOnly style={{ background: 'var(--color-surface2)', cursor: 'not-allowed', opacity: 0.7 }} />
+                    : <div style={{ fontSize: 12, color: 'var(--color-text3)', padding: '8px 0', fontStyle: 'italic' }}>Auto-generated on save (W2W-001, W2W-002…)</div>
+                  }
+                </FormField>
+              </div>
+
+              {/* ── Demographics (Employment Equity) ── */}
+              <div className="fsec">Demographics (Employment Equity)</div>
+              <div className="fgrid">
+                <FormField label="Race Classification" required>
                   <select className="fc" value={formData.race || ''} onChange={(e) => updateField('race', e.target.value)}>
-                    <option value="">Select race</option>
+                    <option value="">Select</option>
                     <option value="Black African">Black African</option>
                     <option value="White">White</option>
                     <option value="Coloured">Coloured</option>
-                    <option value="Indian">Indian</option>
-                    <option value="Asian">Asian</option>
-                    <option value="Other">Other</option>
+                    <option value="Indian/Asian">Indian/Asian</option>
+                    <option value="Prefer not to disclose">Prefer not to disclose</option>
                   </select>
                 </FormField>
                 <FormField label="Nationality">
@@ -536,144 +707,99 @@ export default function EmployeesPage() {
                     <option value="Other">Other</option>
                   </select>
                 </FormField>
-                <FormField label="Disability">
+                <FormField label="Disability Status">
                   <select className="fc" value={formData.disability || 'None'} onChange={(e) => updateField('disability', e.target.value)}>
                     <option value="None">None</option>
                     <option value="Physical">Physical</option>
                     <option value="Visual">Visual</option>
                     <option value="Hearing">Hearing</option>
                     <option value="Intellectual">Intellectual</option>
-                    <option value="Other">Other</option>
+                    <option value="Prefer not to disclose">Prefer not to disclose</option>
                   </select>
                 </FormField>
-                <FormField label="Blood Group">
-                  <select className="fc" value={formData.bloodGroup || 'Unknown'} onChange={(e) => updateField('bloodGroup', e.target.value)}>
-                    <option value="Unknown">Unknown</option>
-                    <option value="A+">A+</option>
-                    <option value="A-">A-</option>
-                    <option value="B+">B+</option>
-                    <option value="B-">B-</option>
-                    <option value="AB+">AB+</option>
-                    <option value="AB-">AB-</option>
-                    <option value="O+">O+</option>
-                    <option value="O-">O-</option>
+                <FormField label="Programme Enrol Date"><input className="fc" type="date" value={formData.epwpEnrolmentDate || ''} onChange={(e) => updateField('epwpEnrolmentDate', e.target.value)} /></FormField>
+              </div>
+
+              {/* ── Programme Assignment ── */}
+              <div className="fsec">Programme Assignment</div>
+              <div className="fgrid">
+                <FormField label="Assigned Site">
+                  <select className="fc" value={formData.siteId || ''} onChange={(e) => updateField('siteId', e.target.value || null)}>
+                    <option value="">— Not site-assigned —</option>
+                    {sitesData.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="Assigned Cooperative">
+                  <select className="fc" value={(formData as any).cooperativeId || ''} onChange={(e) => (updateField as any)('cooperativeId', e.target.value || null)}>
+                    <option value="">— Not assigned —</option>
+                    {coopsData.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </FormField>
               </div>
 
-              {/* ── Employment Details ── */}
-              <div className="fsec">Employment Details</div>
+              {/* ── Employment ── */}
+              <div className="fsec">Employment</div>
               <div className="fgrid">
+                <FormField label="Designation" required>
+                  <select className="fc" value={formData.role || ''} onChange={(e) => updateField('role', e.target.value)}>
+                    <option value="">Select designation</option>
+                    {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </FormField>
                 <FormField label="Department">
                   <select className="fc" value={formData.department || ''} onChange={(e) => updateField('department', e.target.value)}>
                     <option value="">Select department</option>
                     {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </FormField>
-                <FormField label="Designation">
-                  <select className="fc" value={formData.role || ''} onChange={(e) => updateField('role', e.target.value)}>
-                    <option value="">Select designation</option>
-                    {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                </FormField>
-                <FormField label="Assigned Site / Depot / Cooperative">
-                  <select className="fc" value={formData.siteId || ''} onChange={(e) => updateField('siteId', e.target.value || null)}>
-                    <option value="">No Assignment (Global/HQ)</option>
-                    {sitesData.length > 0 && (
-                      <optgroup label="🏗 Sites">
-                        {sitesData.map((s: any) => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {depotsData.length > 0 && (
-                      <optgroup label="🏭 Depots">
-                        {depotsData.map((d: any) => (
-                          <option key={d.id} value={d.id}>{d.name}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {coopsData.length > 0 && (
-                      <optgroup label="🤝 Cooperatives">
-                        {coopsData.map((c: any) => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
-                </FormField>
+                <FormField label="Date of Hire"><input className="fc" type="date" value={formData.startDate || ''} onChange={(e) => updateField('startDate', e.target.value)} /></FormField>
                 <FormField label="Status">
                   <select className="fc" value={formData.status || 'ACTIVE'} onChange={(e) => updateField('status', e.target.value)}>
                     {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
                   </select>
                 </FormField>
-                <FormField label="Start Date"><input className="fc" type="date" value={formData.startDate || ''} onChange={(e) => updateField('startDate', e.target.value)} /></FormField>
-                <FormField label="Daily Rate (R)"><input className="fc" type="number" value={formData.dailyRate || ''} onChange={(e) => updateField('dailyRate', parseFloat(e.target.value) || 0)} placeholder="0.00" /></FormField>
-              </div>
-
-              {/* ── EPWP Enrolment ── */}
-              <div className="fsec">EPWP Enrolment</div>
-              <div className="fgrid">
-                <FormField label="EPWP Reference No."><input className="fc" value={formData.epwpRefNo || ''} onChange={(e) => updateField('epwpRefNo', e.target.value)} placeholder="EPWP ref number" /></FormField>
-                <FormField label="Enrolment Date"><input className="fc" type="date" value={formData.epwpEnrolmentDate || ''} onChange={(e) => updateField('epwpEnrolmentDate', e.target.value)} /></FormField>
-                <FormField label="Youth (Under 35)">
-                  <select className="fc" value={formData.epwpYouth ? 'Yes' : 'No'} onChange={(e) => updateField('epwpYouth', e.target.value === 'Yes')}>
-                    <option value="No">No</option>
-                    <option value="Yes">Yes</option>
+                <FormField label="Monthly Stipend — Fixed (R)"><input className="fc" type="number" value={formData.stipend || ''} onChange={(e) => updateField('stipend', parseFloat(e.target.value) || 0)} placeholder="e.g. 6700 — fixed monthly stipend" /></FormField>
+                <FormField label="Service Fee — Dynamic (R)"><input className="fc" type="number" value={formData.serviceFee || ''} onChange={(e) => updateField('serviceFee', parseFloat(e.target.value) || 0)} placeholder="e.g. 1200 — performance-based" /></FormField>
+                <FormField label="Driving License"><input className="fc" value={formData.licenceCode || ''} onChange={(e) => updateField('licenceCode', e.target.value)} placeholder="e.g. C, C1, B" /></FormField>
+                <FormField label="License Expiry"><input className="fc" type="date" value={formData.licenceExpiry || ''} onChange={(e) => updateField('licenceExpiry', e.target.value)} /></FormField>
+                <FormField label="Exit Date"><input className="fc" type="date" value={formData.exitDate || ''} onChange={(e) => updateField('exitDate', e.target.value)} /></FormField>
+                <FormField label="Exit / Employment Status" full>
+                  <select className="fc" value={formData.exitReason || ''} onChange={(e) => updateField('exitReason', e.target.value)}>
+                    <option value="">— Still Active in Programme —</option>
+                    <option value="Completed Programme">✅ Completed Programme</option>
+                    <option value="Resigned">Resigned Voluntarily</option>
+                    <option value="Dropped Out">Dropped Out</option>
+                    <option value="Dismissed">Dismissed</option>
+                    <option value="Health — Unable to Continue">Health — Unable to Continue</option>
+                    <option value="Relocated">Relocated</option>
+                    <option value="Deceased">Deceased</option>
+                    <option value="Other">Other</option>
                   </select>
                 </FormField>
               </div>
 
-              {/* ── Remuneration ── */}
-              <div className="fsec">Remuneration</div>
+              {/* ── Income Uplift Tracking ── */}
+              <div className="fsec">Income Uplift Tracking</div>
               <div className="fgrid">
-                <FormField label="Stipend (R)"><input className="fc" type="number" value={formData.stipend || ''} onChange={(e) => updateField('stipend', parseFloat(e.target.value) || 0)} placeholder="0.00" /></FormField>
-                <FormField label="Service Fee (R)"><input className="fc" type="number" value={formData.serviceFee || ''} onChange={(e) => updateField('serviceFee', parseFloat(e.target.value) || 0)} placeholder="0.00" /></FormField>
-                <FormField label="Attendance %"><input className="fc" type="number" min={0} max={100} value={formData.attendancePct ?? ''} onChange={(e) => updateField('attendancePct', parseFloat(e.target.value) || 0)} placeholder="100" /></FormField>
+                <FormField label="Monthly Income BEFORE joining W2W (R)"><input className="fc" type="number" value={formData.incomeBeforeW2W || ''} onChange={(e) => updateField('incomeBeforeW2W', parseFloat(e.target.value) || 0)} placeholder="e.g. 800 — as informal picker" /></FormField>
               </div>
 
-              {/* ── Exit (editing only) ── */}
-              {editingId && (
-                <>
-                  <div className="fsec">Exit</div>
-                  <div className="fgrid">
-                    <FormField label="Exit Date"><input className="fc" type="date" value={formData.exitDate || ''} onChange={(e) => updateField('exitDate', e.target.value)} /></FormField>
-                    <FormField label="Exit Reason">
-                      <select className="fc" value={formData.exitReason || ''} onChange={(e) => updateField('exitReason', e.target.value)}>
-                        <option value="">Select reason</option>
-                        <option value="Resigned">Resigned</option>
-                        <option value="Dropped Out">Dropped Out</option>
-                        <option value="Dismissed">Dismissed</option>
-                        <option value="Health">Health</option>
-                        <option value="Relocated">Relocated</option>
-                        <option value="Deceased">Deceased</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </FormField>
-                  </div>
-                </>
-              )}
-
-              {/* ── Income Uplift ── */}
-              <div className="fsec">Income Uplift</div>
+              {/* ── Contact ── */}
+              <div className="fsec">Contact</div>
               <div className="fgrid">
-                <FormField label="Monthly Income BEFORE joining W2W (R)"><input className="fc" type="number" value={formData.incomeBeforeW2W || ''} onChange={(e) => updateField('incomeBeforeW2W', parseFloat(e.target.value) || 0)} placeholder="e.g. 800" /></FormField>
-              </div>
-
-              {/* ── Contact Details ── */}
-              <div className="fsec">Contact Details</div>
-              <div className="fgrid">
-                <FormField label="Current Address"><textarea className="fc" rows={2} value={formData.currentAddress || ''} onChange={(e) => updateField('currentAddress', e.target.value)} placeholder="Current residential address" style={{ resize: 'vertical', minHeight: 48 }} /></FormField>
-                <FormField label="Permanent Address"><textarea className="fc" rows={2} value={formData.permanentAddress || ''} onChange={(e) => updateField('permanentAddress', e.target.value)} placeholder="Permanent address (if different)" style={{ resize: 'vertical', minHeight: 48 }} /></FormField>
+                <FormField label="Phone" required><input className="fc" type="tel" value={formData.phone || ''} onChange={(e) => updateField('phone', e.target.value)} placeholder="082 xxx xxxx" /></FormField>
+                <FormField label="Email"><input className="fc" type="email" value={formData.email || ''} onChange={(e) => updateField('email', e.target.value)} placeholder="email@example.com" /></FormField>
+                <FormField label="Current Address" full><textarea className="fc" rows={2} value={formData.currentAddress || ''} onChange={(e) => updateField('currentAddress', e.target.value)} placeholder="Current residential address" style={{ resize: 'vertical', minHeight: 48 }} /></FormField>
+                <FormField label="Permanent Address" full><textarea className="fc" rows={2} value={formData.permanentAddress || ''} onChange={(e) => updateField('permanentAddress', e.target.value)} placeholder="Permanent address (if different)" style={{ resize: 'vertical', minHeight: 48 }} /></FormField>
               </div>
 
               {/* ── Emergency Contact ── */}
               <div className="fsec">Emergency Contact</div>
               <div className="fgrid">
-                <FormField label="Name"><input className="fc" value={formData.emergencyName || ''} onChange={(e) => updateField('emergencyName', e.target.value)} placeholder="Emergency contact name" /></FormField>
+                <FormField label="Name" required><input className="fc" value={formData.emergencyName || ''} onChange={(e) => updateField('emergencyName', e.target.value)} placeholder="Emergency contact name" /></FormField>
                 <FormField label="Relationship">
                   <select className="fc" value={formData.emergencyRelationship || ''} onChange={(e) => updateField('emergencyRelationship', e.target.value)}>
-                    <option value="">Select relationship</option>
+                    <option value="">Select</option>
                     <option value="Spouse">Spouse</option>
                     <option value="Parent">Parent</option>
                     <option value="Sibling">Sibling</option>
@@ -681,12 +807,12 @@ export default function EmployeesPage() {
                     <option value="Other">Other</option>
                   </select>
                 </FormField>
-                <FormField label="Phone"><input className="fc" type="tel" value={formData.emergencyPhone || ''} onChange={(e) => updateField('emergencyPhone', e.target.value)} placeholder="082 xxx xxxx" /></FormField>
+                <FormField label="Phone" required><input className="fc" type="tel" value={formData.emergencyPhone || ''} onChange={(e) => updateField('emergencyPhone', e.target.value)} placeholder="082 xxx xxxx" /></FormField>
               </div>
 
-              {/* ── Banking Details ── */}
-              <div className="fsec">Banking Details</div>
-              <div className="fgrid3">
+              {/* ── Bank Details (Confidential) ── */}
+              <div className="fsec">Bank Details (Confidential)</div>
+              <div className="fgrid">
                 <FormField label="Bank Name">
                   <select className="fc" value={formData.bankName || ''} onChange={(e) => updateField('bankName', e.target.value)}>
                     <option value="">Select bank</option>
@@ -695,21 +821,92 @@ export default function EmployeesPage() {
                   </select>
                 </FormField>
                 <FormField label="Account Number"><input className="fc" value={formData.bankAccount || ''} onChange={(e) => updateField('bankAccount', e.target.value)} placeholder="Account number" /></FormField>
-                <FormField label="Branch Code"><input className="fc" value={formData.bankBranch || ''} onChange={(e) => updateField('bankBranch', e.target.value)} placeholder="Branch code" /></FormField>
+                <FormField label="Branch Code"><input className="fc" value={formData.bankBranch || ''} onChange={(e) => updateField('bankBranch', e.target.value)} placeholder="6-digit code" /></FormField>
+              </div>
+              {/* ── Documents ── */}
+              <div className="fsec">Documents</div>
+              <div className="fgrid">
+                <div className="fg full">
+                  <label className="fl">Employee Documents</label>
+
+                  {/* Existing documents list */}
+                  {empDocuments.length > 0 && (
+                    <div style={{ marginBottom: 10 }}>
+                      {empDocuments.map((doc) => (
+                        <div key={doc.id} style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '7px 10px', background: 'var(--color-surface3)',
+                          borderRadius: 7, marginBottom: 5,
+                        }}>
+                          <FileText size={14} style={{ color: 'var(--color-w2w)', flexShrink: 0 }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.name}</div>
+                            <div style={{ fontSize: 10, color: 'var(--color-text3)' }}>{doc.type} · {doc.uploaded}</div>
+                          </div>
+                          <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--color-red)', padding: '2px 6px', fontSize: 11 }}
+                            onClick={() => removeDocument(doc.id)}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add new document row */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, alignItems: 'end', marginTop: 8 }}>
+                    <div>
+                      <label className="fl" style={{ fontSize: 10 }}>Document Type</label>
+                      <select className="fc" value={newDocType} onChange={(e) => setNewDocType(e.target.value)}>
+                        {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="fl" style={{ fontSize: 10 }}>File(s)</label>
+                      <label style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        padding: '9px 12px', border: '1px solid var(--color-border)',
+                        borderRadius: 8, cursor: 'pointer', fontSize: 12,
+                        background: 'var(--color-surface2)',
+                      }}>
+                        <Upload size={13} /> Choose Files
+                        <input ref={docInputRef} type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" style={{ display: 'none' }} />
+                      </label>
+                    </div>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 18 }} onClick={handleDocUpload}>
+                      <Plus size={12} /> Add
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--color-text3)', marginTop: 4 }}>
+                    PDF, JPG, PNG, DOC accepted · Max 5 MB per file · Multiple files supported
+                  </div>
+                </div>
               </div>
 
-              {/* ── System Access ── */}
-              <div className="fsec">System Access</div>
+              {/* ── Vehicle Licence (SA) ── */}
+              <div className="fsec">Vehicle Licence (SA)</div>
               <div className="fgrid">
-                <FormField label="System Role (Custom)">
-                  <select className="fc" value={formData.customRoleId || ''} onChange={(e) => updateField('customRoleId', e.target.value)}>
-                    <option value="">Select role</option>
-                    {customRoles?.map((r: any) => (
-                      <option key={r.id} value={r.id}>{r.name}</option>
-                    ))}
+                <FormField label="Licence Code">
+                  <select className="fc" value={formData.licenceCode || ''} onChange={(e) => updateField('licenceCode', e.target.value)}>
+                    <option value="">Select code</option>
+                    <option value="A">A – Motorcycle</option>
+                    <option value="A1">A1 – Light Motorcycle</option>
+                    <option value="B">B – Light Motor Vehicle (&lt;3 500 kg)</option>
+                    <option value="C">C – Heavy Motor Vehicle (up to 16 000 kg)</option>
+                    <option value="C1">C1 – Heavy Motor Vehicle (3 500–16 000 kg)</option>
+                    <option value="EB">EB – Light Vehicle + Trailer</option>
+                    <option value="EC">EC – Heavy Vehicle + Trailer (&gt;16 000 kg)</option>
+                    <option value="EC1">EC1 – Heavy Vehicle + Trailer (3 500–16 000 kg)</option>
                   </select>
                 </FormField>
-                <FormField label="Login Password"><input className="fc" type="text" value={formData.loginPassword || ''} onChange={(e) => updateField('loginPassword', e.target.value)} placeholder="Set login password" /></FormField>
+                <FormField label="Licence Number"><input className="fc" value={formData.licenceNumber || ''} onChange={(e) => updateField('licenceNumber', e.target.value)} placeholder="e.g. 1234567890" /></FormField>
+                <FormField label="Licence Expiry"><input className="fc" type="date" value={formData.licenceExpiry || ''} onChange={(e) => updateField('licenceExpiry', e.target.value)} /></FormField>
+                <FormField label="PrDP (Professional Driving Permit)">
+                  <select className="fc" value={formData.hasPrDP ? 'Yes' : 'No'} onChange={(e) => updateField('hasPrDP', e.target.value === 'Yes')}>
+                    <option value="No">No</option>
+                    <option value="Yes">Yes</option>
+                  </select>
+                </FormField>
+                {formData.hasPrDP && (
+                  <FormField label="PrDP Expiry"><input className="fc" type="date" value={formData.prdpExpiry || ''} onChange={(e) => updateField('prdpExpiry', e.target.value)} /></FormField>
+                )}
               </div>
             </div>
             <div className="mf">
@@ -772,9 +969,9 @@ export default function EmployeesPage() {
               <button onClick={() => { setShowViewModal(false); openIdCard(viewingEmployee); }} className="btn btn-ghost">
                 <Printer size={13} /> Print ID
               </button>
-              <button onClick={() => { setShowViewModal(false); openEdit(viewingEmployee); }} className="btn btn-primary">
+              {canEdit('employees') && <button onClick={() => { setShowViewModal(false); openEdit(viewingEmployee); }} className="btn btn-primary">
                 <Edit2 size={13} /> Edit
-              </button>
+              </button>}
               <button onClick={() => setShowViewModal(false)} className="btn btn-ghost">Close</button>
             </div>
           </div>
@@ -892,9 +1089,6 @@ function WasteTabContent({
   totalRev: number;
   byType: Array<{ name: string; kg: number; rev: number; count: number }>;
 }) {
-  if (logs.length === 0) {
-    return <EmptyTab icon="♻" title="No waste collected yet" hint="This employee hasn't logged any waste collections." />;
-  }
   return (
     <>
       <div className="g3 mb14">
@@ -1061,14 +1255,16 @@ function ActionIcon({
 function FormField({
   label,
   required,
+  full,
   children,
 }: {
   label: string;
   required?: boolean;
-  children: React.ReactElement;
+  full?: boolean;
+  children: React.ReactElement | React.ReactNode;
 }) {
   return (
-    <div className="fg">
+    <div className={full ? 'fg full' : 'fg'}>
       <label className="fl">
         {label} {required && <span className="req">*</span>}
       </label>

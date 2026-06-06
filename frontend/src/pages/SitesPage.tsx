@@ -5,11 +5,12 @@ import { MapPin, Building2, Plus, Download, Search, X, Edit2, Trash2, Eye } from
 import { exportCsv } from '../utils/csv';
 import { loadGeography } from '../utils/geography';
 import { loadDepotTypes } from './W2WSettingsPage';
+import { usePermissions } from '../hooks/usePermissions';
 
 const BASE_TYPE_LABELS: Record<string, string> = {
-  COOPERATIVE: 'Cooperative',
-  DEPOT: 'Depot',
-  BUYBACK_CENTRE: 'Buyback Centre',
+  IWMC: 'IWMC',
+  MRC: 'MRF / Material Recovery',
+  BBC: 'BBC / Buyback Centre',
 };
 
 function getTypeLabels(): Record<string, string> {
@@ -32,6 +33,7 @@ const EMPTY: SitePayload = {
 
 export default function SitesPage() {
   const qc = useQueryClient();
+  const { canCreate, canEdit, canDelete } = usePermissions();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [modal, setModal] = useState<'add' | 'edit' | 'view' | null>(null);
@@ -98,8 +100,8 @@ export default function SitesPage() {
   const stats = {
     total: sites.length,
     active: sites.filter((s) => s.status === 'ACTIVE').length,
-    coops: sites.filter((s) => s.type === 'COOPERATIVE').length,
-    depots: sites.filter((s) => s.type === 'DEPOT').length,
+    iwmc: sites.filter((s) => s.type === 'IWMC').length,
+    bbc: sites.filter((s) => s.type === 'BBC').length,
   };
 
   // ── Handlers ──
@@ -115,6 +117,7 @@ export default function SitesPage() {
       launched: s.launched || '', notes: s.notes || '',
       provinceId: s.provinceId || '', municipalityId: s.municipalityId || '',
       subRegionId: s.subRegionId || '',
+      metadata: s.metadata || {},
     });
     setActive(s); setModal('edit');
   };
@@ -194,7 +197,7 @@ export default function SitesPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-accent" onClick={openAdd}><Plus size={13} /> Add Site</button>
+          {canCreate('sites') && <button className="btn btn-accent" onClick={openAdd}><Plus size={13} /> Add Site</button>}
           <button className="btn btn-ghost" onClick={onExport}><Download size={13} /> Export</button>
         </div>
       </div>
@@ -341,8 +344,8 @@ export default function SitesPage() {
                                 <td><span className={`badge ${s.status === 'ACTIVE' ? 'bg' : 'ba'}`} style={{ fontSize: 9 }}>{s.status === 'ACTIVE' ? 'Active' : s.status}</span></td>
                                 <td>
                                   <div style={{ display: 'flex', gap: 4 }}>
-                                    <RowBtn title="Edit" onClick={() => openEdit(s)}><Edit2 size={13} /></RowBtn>
-                                    <RowBtn title="Delete" danger onClick={() => remove(s)}><Trash2 size={13} /></RowBtn>
+                                    {canEdit('sites') && <RowBtn title="Edit" onClick={() => openEdit(s)}><Edit2 size={13} /></RowBtn>}
+                                    {canDelete('sites') && <RowBtn title="Delete" danger onClick={() => remove(s)}><Trash2 size={13} /></RowBtn>}
                                   </div>
                                 </td>
                               </tr>
@@ -452,6 +455,49 @@ export default function SitesPage() {
                     <textarea className="fc" rows={3} value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
                   </div>
                 </div>
+
+                {/* ── Depot-Specific Fields ── */}
+                {form.type === 'DEPOT' && (() => {
+                  const meta = (form.metadata || {}) as Record<string, any>;
+                  const setMeta = (k: string, v: any) => setForm({ ...form, metadata: { ...meta, [k]: v } });
+                  return (
+                    <div className="full">
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.1em', borderBottom: '2px solid var(--color-w2w-light)', paddingBottom: 6, marginTop: 14, marginBottom: 14 }}>
+                        Depot Details
+                      </div>
+                      <div className="fgrid">
+                        <div className="fg"><label className="fl">GPS Coordinates</label>
+                          <input className="fc" value={meta.depotGps || ''} onChange={(e) => setMeta('depotGps', e.target.value)} placeholder="-26.1234,28.0456" />
+                          <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 4, fontSize: 11 }} onClick={() => {
+                            navigator.geolocation?.getCurrentPosition((p) => {
+                              setMeta('depotGps', p.coords.latitude.toFixed(6) + ',' + p.coords.longitude.toFixed(6));
+                            });
+                          }}>📍 Get GPS</button>
+                        </div>
+                        <div className="fg"><label className="fl">Depot Manager</label>
+                          <input className="fc" value={meta.depotManager || ''} onChange={(e) => setMeta('depotManager', e.target.value)} placeholder="Manager name" />
+                        </div>
+                        <div className="fg"><label className="fl">Operating Hours</label>
+                          <input className="fc" value={meta.operatingHours || ''} onChange={(e) => setMeta('operatingHours', e.target.value)} placeholder="e.g. Mon-Fri 07:00-17:00" />
+                        </div>
+                        <div className="fg"><label className="fl">Phone</label>
+                          <input className="fc" value={meta.depotPhone || ''} onChange={(e) => setMeta('depotPhone', e.target.value)} placeholder="+27 ..." />
+                        </div>
+                        <div className="fg"><label className="fl">Current Stock (tonnes)</label>
+                          <input className="fc" type="number" step="0.1" min="0" value={meta.currentStockTonnes ?? ''} onChange={(e) => setMeta('currentStockTonnes', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0" />
+                        </div>
+                        <div className="fg"><label className="fl">Capacity (tonnes)</label>
+                          <input className="fc" type="number" step="0.1" min="0" value={meta.capacityTonnes ?? ''} onChange={(e) => setMeta('capacityTonnes', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0" />
+                        </div>
+                        <div className="full">
+                          <div className="fg"><label className="fl">Depot Address</label>
+                            <input className="fc" value={meta.depotAddress || ''} onChange={(e) => setMeta('depotAddress', e.target.value)} placeholder="Full depot address" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             <div className="mf">
@@ -494,6 +540,16 @@ export default function SitesPage() {
                 ['Launch Date', active.launched],
                 ['Status', active.status],
                 ['Notes', active.notes],
+                // Depot-specific fields from metadata
+                ...(active.type === 'DEPOT' && active.metadata ? [
+                  ['Depot GPS', active.metadata.depotGps],
+                  ['Depot Manager', active.metadata.depotManager],
+                  ['Operating Hours', active.metadata.operatingHours],
+                  ['Depot Phone', active.metadata.depotPhone],
+                  ['Current Stock', active.metadata.currentStockTonnes != null ? active.metadata.currentStockTonnes + ' t' : ''],
+                  ['Capacity', active.metadata.capacityTonnes != null ? active.metadata.capacityTonnes + ' t' : ''],
+                  ['Depot Address', active.metadata.depotAddress],
+                ] : []),
               ].map(([k, v]) => (
                 <div key={k as string} className="drow">
                   <div className="dlb">{k}</div>

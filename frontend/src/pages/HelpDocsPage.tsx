@@ -1,3 +1,15 @@
+/**
+ * @module HelpDocsPage
+ * @description comprehensive user documentation and help center for the W2W platform.
+ * It provides structured guides, FAQs, POPIA compliance info, and shortcuts.
+ * 
+ * @structure
+ * - MODULE_DOCS: Metadata for each platform module (dashboard, waste-logs, etc.)
+ * - FAQS: Common questions and answers
+ * - SHORTCUTS: Global keyboard shortcuts
+ * - HelpDocsPage (Component): Sidebar navigation and dynamic content rendering
+ */
+
 import { useState, useMemo } from 'react';
 import {
   Search, BookOpen, ChevronDown, ChevronRight, ExternalLink,
@@ -46,11 +58,6 @@ const MODULE_DOCS: ModuleDoc[] = [
     description: 'Manage PPE, consumables, and equipment inventory across all sites.',
     features: ['Item catalogue with categories (PPE, Consumables, Equipment)', 'Quantity on-hand tracking', 'Reorder point alerts', 'Stock status indicators (OK, Low, Out)'],
     tips: ['Set reorder points to get automatic low-stock warnings'],
-  },
-  {
-    id: 'stock-variance', title: 'Stock Variance', icon: <AlertTriangle size={16} />, section: 'Inventory & Assets',
-    description: 'Reconciliation report comparing expected vs actual stock levels to identify discrepancies.',
-    features: ['System vs Physical count comparison', 'Variance calculation', 'Shrinkage identification', 'Audit trail for stock adjustments'],
   },
   {
     id: 'vehicles', title: 'Vehicles & Fleet', icon: <Truck size={16} />, section: 'Inventory & Assets',

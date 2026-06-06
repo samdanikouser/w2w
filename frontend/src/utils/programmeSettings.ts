@@ -34,6 +34,7 @@ export interface ProgrammeSettings {
   trainingModules: TrainingModule[];
   paymentScales: PaymentScale[];
   costCenters: CostCenter[];
+  proPartners: string[];
   system: Record<string, string>;
   // Dynamic Employee Fields
   departments: string[];
@@ -87,6 +88,7 @@ const DEFAULTS: ProgrammeSettings = {
     version: 'W2W Platform v10',
     reference: 'ACS-SW-2026-047',
   },
+  proPartners: ['Petco', 'Polyco', 'Fibre Cycle', 'Metpac', 'E-Wasa', 'Circular Energy'],
   departments: ['Collections', 'Sorting', 'Admin', 'Transport', 'Security', 'Management'],
   designations: ['Collector', 'Sorter', 'Driver', 'Supervisor', 'Admin Officer', 'Manager', 'Security Guard'],
   banks: ['Standard Bank', 'FNB', 'ABSA', 'Nedbank', 'Capitec'],

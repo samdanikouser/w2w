@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, requireAction, type AuthRequest } from '../middleware/auth.js';
+import { applySiteScope, enforceCreateScope, getAllowedSiteIds } from '../middleware/siteScoping.js';
 import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
@@ -26,9 +27,8 @@ router.get('/', async (req: AuthRequest, res, next) => {
     if (status && status !== 'all') where.status = status;
 
     // Enforce Depot-level sandboxing
-    if (req.userSiteId) {
-      where.siteId = req.userSiteId;
-    } else if (siteId) {
+    applySiteScope(req, where);
+    if (!where.siteId && siteId) {
       where.siteId = siteId;
     }
     if (startDate || endDate) {
@@ -77,7 +77,7 @@ router.get('/', async (req: AuthRequest, res, next) => {
 });
 
 // ── POST /api/waste-logs ──
-router.post('/', async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('waste-logs'), requireAction('waste-logs', 'create'), enforceCreateScope(), async (req: AuthRequest, res, next) => {
   try {
     const data = logSchema.parse(req.body);
     const totalValue = data.quantity * data.pricePerUnit;
@@ -122,8 +122,16 @@ router.post('/', async (req: AuthRequest, res, next) => {
 });
 
 // ── PATCH /api/waste-logs/:id/approve ──
-router.patch('/:id/approve', requireModule('waste-logs'), async (req: AuthRequest, res, next) => {
+router.patch('/:id/approve', requireModule('waste-logs'), requireAction('waste-logs', 'edit'), async (req: AuthRequest, res, next) => {
   try {
+    const allowed = getAllowedSiteIds(req);
+    if (allowed.length > 0) {
+      const existing = await prisma.wasteLog.findUnique({ where: { id: req.params.id as string }, select: { siteId: true } });
+      if (existing?.siteId && !allowed.includes(existing.siteId)) {
+        return res.status(403).json({ error: 'You do not have access to this resource' });
+      }
+    }
+
     const log = await prisma.wasteLog.update({
       where: { id: req.params.id as string },
       data: { status: 'APPROVED', approvedById: req.userId, approvedAt: new Date() },
@@ -140,8 +148,16 @@ router.patch('/:id/approve', requireModule('waste-logs'), async (req: AuthReques
 });
 
 // ── PATCH /api/waste-logs/:id/reject ──
-router.patch('/:id/reject', requireModule('waste-logs'), async (req: AuthRequest, res, next) => {
+router.patch('/:id/reject', requireModule('waste-logs'), requireAction('waste-logs', 'edit'), async (req: AuthRequest, res, next) => {
   try {
+    const allowed = getAllowedSiteIds(req);
+    if (allowed.length > 0) {
+      const existing = await prisma.wasteLog.findUnique({ where: { id: req.params.id as string }, select: { siteId: true } });
+      if (existing?.siteId && !allowed.includes(existing.siteId)) {
+        return res.status(403).json({ error: 'You do not have access to this resource' });
+      }
+    }
+
     const log = await prisma.wasteLog.update({
       where: { id: req.params.id as string },
       data: { status: 'REJECTED', approvedById: req.userId, approvedAt: new Date() },
@@ -158,8 +174,16 @@ router.patch('/:id/reject', requireModule('waste-logs'), async (req: AuthRequest
 });
 
 // ── DELETE /api/waste-logs/:id ──
-router.delete('/:id', requireModule('waste-logs'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('waste-logs'), requireAction('waste-logs', 'delete'), async (req: AuthRequest, res, next) => {
   try {
+    const allowed = getAllowedSiteIds(req);
+    if (allowed.length > 0) {
+      const existing = await prisma.wasteLog.findUnique({ where: { id: req.params.id as string }, select: { siteId: true } });
+      if (existing?.siteId && !allowed.includes(existing.siteId)) {
+        return res.status(403).json({ error: 'You do not have access to this resource' });
+      }
+    }
+
     await prisma.wasteLog.delete({ where: { id: req.params.id as string } });
 
     await prisma.auditLog.create({

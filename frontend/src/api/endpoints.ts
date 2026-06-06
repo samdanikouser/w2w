@@ -1,6 +1,15 @@
 import api from './client';
 
 // ═══════════════════════════════════════════════
+//  Settings API
+// ═══════════════════════════════════════════════
+
+export const settingsApi = {
+  get: () => api.get('/settings').then((r) => r.data),
+  update: (data: any) => api.put('/settings', data).then((r) => r.data),
+};
+
+// ═══════════════════════════════════════════════
 //  Auth API
 // ═══════════════════════════════════════════════
 
@@ -40,7 +49,9 @@ export const authApi = {
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post('/auth/change-password', { currentPassword, newPassword }).then((r) => r.data),
   forgotPassword: (email: string) =>
-    api.post<{ message: string; tempPassword?: string }>('/auth/forgot-password', { email }).then((r) => r.data),
+    api.post<{ message: string }>('/auth/forgot-password', { email }).then((r) => r.data),
+  refresh: () => api.post<AuthResponse>('/auth/refresh').then((r) => r.data),
+  logout: () => api.post('/auth/logout').then((r) => r.data),
 };
 
 // ═══════════════════════════════════════════════
@@ -98,6 +109,12 @@ export interface EmployeePayload {
   uniformIssued?: boolean;
   ppeIssued?: boolean;
   trainingComplete?: number;
+  // Vehicle Licence (SA)
+  licenceCode?: string;
+  licenceNumber?: string;
+  licenceExpiry?: string;
+  hasPrDP?: boolean;
+  prdpExpiry?: string;
 }
 
 export interface EmployeeListResponse {
@@ -265,6 +282,8 @@ export const trainingApi = {
   createModule: (data: TrainingModulePayload) => api.post('/training/modules', data).then((r) => r.data),
   updateModule: (id: string, data: Partial<TrainingModulePayload>) => api.put(`/training/modules/${id}`, data).then((r) => r.data),
   deleteModule: (id: string) => api.delete(`/training/modules/${id}`).then((r) => r.data),
+  syncModules: (modules: Array<{ settingsId: string; name: string; type: string }>) =>
+    api.post('/training/modules/sync', modules).then((r) => r.data),
   listRecords: () => api.get<any[]>('/training/records').then((r) => r.data),
   createRecord: (data: TrainingRecordPayload) => api.post('/training/records', data).then((r) => r.data),
   updateRecord: (id: string, data: Partial<TrainingRecordPayload>) => api.put(`/training/records/${id}`, data).then((r) => r.data),
@@ -306,12 +325,18 @@ export interface EprReportPayload {
   totalRevenue?: number;
   status?: 'DRAFT' | 'SUBMITTED' | 'APPROVED_REPORT' | 'REJECTED_REPORT';
   data?: any;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  buyerConfirmation?: string;
+  traceabilityRef?: string;
 }
 export const eprReportsApi = {
   list: (params?: Record<string, string>) => api.get<any[]>('/epr-reports', { params }).then((r) => r.data),
   create: (data: EprReportPayload) => api.post('/epr-reports', data).then((r) => r.data),
   update: (id: string, data: Partial<EprReportPayload>) => api.put(`/epr-reports/${id}`, data).then((r) => r.data),
   delete: (id: string) => api.delete(`/epr-reports/${id}`).then((r) => r.data),
+  approve: (id: string) => api.patch(`/epr-reports/${id}/approve`).then((r) => r.data),
+  reject: (id: string, data: { reason: string }) => api.patch(`/epr-reports/${id}/reject`, data).then((r) => r.data),
 };
 
 // ═══════════════════════════════════════════════

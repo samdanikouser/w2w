@@ -16,15 +16,6 @@ const STATUS_LABELS: Record<string, string> = {
   PROBATION: 'Probation',
 };
 
-const STAGES = [
-  { id: 'application', label: 'Application' },
-  { id: 'docs', label: 'Documents' },
-  { id: 'induction', label: 'Induction' },
-  { id: 'ppe', label: 'PPE Issue' },
-  { id: 'training', label: 'Initial Training' },
-  { id: 'active', label: 'Active' },
-];
-
 function avatarColor(id: string): string {
   const palette = ['#146484', '#00c896', '#d97706', '#6d28d9', '#c0392b', '#1a9ec4', '#10b981', '#9b7fe8'];
   let h = 0;
@@ -40,37 +31,26 @@ export default function OnboardingPage() {
   const { data: empData } = useQuery({ queryKey: ['employees', 'all'], queryFn: () => employeesApi.list({}) });
   const employees: any[] = empData?.data || [];
 
-  // ── Pipeline (funnel view) ──
-  const pipeline = useMemo(() => {
-    const today = new Date();
-    return employees
-      .map((e: any) => {
-        const start = e.startDate ? new Date(e.startDate) : null;
-        const daysIn = start ? Math.floor((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) : 999;
-        let stage = STAGES.length - 1;
-        if (e.status === 'PROBATION' && daysIn < 30) stage = 4;
-        else if (e.status === 'PROBATION' && daysIn < 7) stage = 3;
-        else if (e.status === 'PROBATION' && daysIn < 3) stage = 2;
-        else if (e.status === 'PROBATION') stage = 4;
-        else if (e.status === 'ACTIVE' && daysIn < 30) stage = 5;
-        else stage = STAGES.length - 1;
-        return { ...e, daysIn, stage };
-      })
-      .filter((e: any) => e.status === 'PROBATION' || (e.status === 'ACTIVE' && e.daysIn < 60))
-      .sort((a, b) => a.daysIn - b.daysIn);
-  }, [employees]);
+  // ── Stats based on actual onboardStatus ──
+  const completedOnboard = useMemo(() =>
+    employees.filter((e: any) => e.onboardStatus === 'Complete'),
+  [employees]);
 
-  const stageCounts = STAGES.map((_, idx) => pipeline.filter((p) => p.stage === idx).length);
-  const inProgress = pipeline.filter((p) => p.stage < STAGES.length - 1).length;
-  const completed = pipeline.filter((p) => p.stage === STAGES.length - 1).length;
-
-  // ── Onboarding Pipeline (Uniform / PPE / Issue) ──
-  const pendingOnboard = useMemo(() => {
-    return employees.filter((e: any) => {
+  const inProgressOnboard = useMemo(() =>
+    employees.filter((e: any) => {
       const ob = e.onboardStatus || '';
-      return ob !== 'Complete' && (e.status === 'ACTIVE' || e.status === 'PROBATION' || !ob);
-    });
-  }, [employees]);
+      return ob !== 'Complete' && (e.status === 'ACTIVE' || e.status === 'PROBATION');
+    }),
+  [employees]);
+
+  const pendingOnboard = useMemo(() =>
+    employees.filter((e: any) => {
+      const ob = e.onboardStatus || '';
+      return ob !== 'Complete' && (e.status === 'ACTIVE' || e.status === 'PROBATION');
+    }),
+  [employees]);
+
+  const totalActive = employees.filter((e: any) => e.status === 'ACTIVE' || e.status === 'PROBATION').length;
 
   // ── Mutations for Issue / Complete ──
   const issueMut = useMutation({
@@ -95,7 +75,7 @@ export default function OnboardingPage() {
       <div className="ph">
         <div>
           <div className="pt">Employee Onboarding</div>
-          <div className="ps">{pipeline.length} new hire{pipeline.length === 1 ? '' : 's'} in pipeline · {inProgress} in progress</div>
+          <div className="ps">{totalActive} active employee{totalActive === 1 ? '' : 's'} · {inProgressOnboard.length} in progress</div>
         </div>
       </div>
 
@@ -104,15 +84,15 @@ export default function OnboardingPage() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 13, height: 13, flexShrink: 0 }}>
           <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" />
         </svg>
-        <span>New employees are automatically assigned all mandatory training modules. Complete each checklist step to mark onboarding as complete.</span>
+        <span>Issue uniform and PPE, then mark onboarding as complete for each employee.</span>
       </div>
 
       {/* Stats */}
       <div className="stats-grid">
-        <StatCard label="In Pipeline" value={String(pipeline.length)} sub="Recent hires" icon="🚀" rail="sc-blue" color="var(--color-w2w)" />
-        <StatCard label="In Progress" value={String(inProgress)} sub="Awaiting steps" icon="⏳" rail="sc-amber" color="var(--color-amber)" />
-        <StatCard label="Completed (30d)" value={String(completed)} sub="Recently activated" icon="✅" rail="sc-green" color="var(--color-green)" />
-        <StatCard label="Pending Onboard" value={String(pendingOnboard.length)} sub="Uniform / PPE / Training" icon="📋" rail="sc-purple" color="var(--color-purple)" />
+        <StatCard label="Total Employees" value={String(totalActive)} sub="Active & Probation" icon="👥" rail="sc-blue" color="var(--color-w2w)" />
+        <StatCard label="In Progress" value={String(inProgressOnboard.length)} sub="Awaiting steps" icon="⏳" rail="sc-amber" color="var(--color-amber)" />
+        <StatCard label="Completed" value={String(completedOnboard.length)} sub="Onboarding done" icon="✅" rail="sc-green" color="var(--color-green)" />
+        <StatCard label="Pending Onboard" value={String(pendingOnboard.length)} sub="Uniform / PPE needed" icon="📋" rail="sc-purple" color="var(--color-purple)" />
       </div>
 
       {/* ── Onboarding Pipeline (matches prototype exactly) ── */}
@@ -148,11 +128,13 @@ export default function OnboardingPage() {
                   const uniformOk = emp.uniformIssued === true;
                   const ppeOk = emp.ppeIssued === true;
                   const trainingCount = emp.trainingComplete ?? 0;
-                  const mandatoryTotal = 5; // default mandatory training count
-                  const pct = mandatoryTotal > 0 ? Math.round((trainingCount / mandatoryTotal) * 100) : 0;
+                  // Use actual assigned training count; if none assigned, training is satisfied
+                  const mandatoryTotal = emp.trainings?.filter((t: any) => t.trainingModule?.type === 'MANDATORY').length || 0;
+                  const hasTraining = mandatoryTotal > 0;
+                  const pct = hasTraining ? Math.round((trainingCount / mandatoryTotal) * 100) : 100;
                   const ob = emp.onboardStatus || 'In Progress';
                   const isComplete = ob === 'Complete';
-                  const canComplete = uniformOk && ppeOk && pct >= 60;
+                  const canComplete = uniformOk && ppeOk;
 
                   return (
                     <tr key={emp.id}>
@@ -194,12 +176,18 @@ export default function OnboardingPage() {
                         )}
                       </td>
                       <td style={{ minWidth: 120 }}>
-                        <div className="pb" style={{ marginBottom: 3 }}>
-                          <div className="pf pf-b" style={{ width: pct + '%' }} />
-                        </div>
-                        <div style={{ fontSize: 10, color: 'var(--color-text3)' }}>
-                          {trainingCount}/{mandatoryTotal} ({pct}%)
-                        </div>
+                        {hasTraining ? (
+                          <>
+                            <div className="pb" style={{ marginBottom: 3 }}>
+                              <div className="pf pf-b" style={{ width: pct + '%' }} />
+                            </div>
+                            <div style={{ fontSize: 10, color: 'var(--color-text3)' }}>
+                              {trainingCount}/{mandatoryTotal} ({pct}%)
+                            </div>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: 10, color: 'var(--color-text3)' }}>✓ No mandatory training</span>
+                        )}
                       </td>
                       <td>
                         <span className={`badge ${isComplete ? 'bg' : 'ba'}`} style={{ fontSize: 10 }}>
@@ -207,7 +195,9 @@ export default function OnboardingPage() {
                         </span>
                       </td>
                       <td>
-                        {!isComplete && canComplete ? (
+                        {isComplete ? (
+                          <span className="badge bg" style={{ fontSize: 10 }}>✓ Completed</span>
+                        ) : canComplete ? (
                           <button
                             className="btn btn-accent btn-sm"
                             style={{ fontSize: 10 }}
@@ -216,7 +206,18 @@ export default function OnboardingPage() {
                           >
                             Complete
                           </button>
-                        ) : null}
+                        ) : (
+                          <div style={{ fontSize: 10, color: 'var(--color-text3)', lineHeight: 1.5 }}>
+                            {(() => {
+                              const pending: string[] = [];
+                              if (!uniformOk) pending.push('Uniform');
+                              if (!ppeOk) pending.push('PPE');
+                              return pending.length > 0
+                                ? <span style={{ color: 'var(--color-amber)' }}>⏳ Awaiting {pending.join(' & ')}</span>
+                                : <span style={{ color: 'var(--color-green)' }}>✓ Ready to complete</span>;
+                            })()}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -224,30 +225,6 @@ export default function OnboardingPage() {
               )}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      {/* Stage funnel */}
-      <div className="card mb14">
-        <div className="ch"><div className="ct">Onboarding Funnel</div><div className="cs">Pipeline distribution by stage</div></div>
-        <div className="cb" style={{ display: 'grid', gridTemplateColumns: `repeat(${STAGES.length}, 1fr)`, gap: 8 }}>
-          {STAGES.map((stage, idx) => {
-            const count = stageCounts[idx];
-            return (
-              <div key={stage.id} style={{
-                padding: '14px 12px',
-                background: count > 0 ? 'var(--color-w2w-pale)' : 'var(--color-surface2)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-md)',
-                textAlign: 'center',
-              }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: count > 0 ? 'var(--color-w2w)' : 'var(--color-text3)' }}>{count}</div>
-                <div style={{ fontSize: 10, color: 'var(--color-text3)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginTop: 4 }}>
-                  {stage.label}
-                </div>
-              </div>
-            );
-          })}
         </div>
       </div>
     </div>

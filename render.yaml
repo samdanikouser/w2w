@@ -1,0 +1,50 @@
+services:
+  # ── 1. The PostgreSQL Database ──
+  - type: psql
+    name: w2w-database
+    plan: free # Change this to 'starter' or higher for production!
+    region: frankfurt # Change to your preferred region (e.g., oregon, frankfurt, singapore)
+
+  # ── 2. The Node.js API (Backend) ──
+  - type: web
+    name: w2w-backend
+    env: node
+    plan: free
+    region: frankfurt
+    rootDir: backend
+    buildCommand: "npm install && npm run db:generate && npm run db:push && npm run build"
+    startCommand: "npm run start"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: w2w-database
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true # Render will automatically create a secure 256-bit random string
+      - key: NODE_ENV
+        value: production
+      - key: CORS_ORIGIN
+        value: '*' # Or lock this down to the exact URL of your frontend once it's deployed
+
+  # ── 3. The React/Vite Static Site (Frontend) ──
+  - type: web
+    name: w2w-frontend
+    env: static
+    plan: free
+    region: frankfurt
+    rootDir: frontend
+    buildCommand: "npm install && npm run build"
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        # This automatically pulls the live URL of the backend service created above!
+        fromService:
+          type: web
+          name: w2w-backend
+          property: host
+          format: https://{host}
+    routes:
+      # This route catches all traffic and sends it to index.html so React Router handles it (SPA routing)
+      - type: rewrite
+        source: /*
+        destination: /index.html

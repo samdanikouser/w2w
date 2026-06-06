@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { employeesApi, sitesApi, depotsApi, wasteLogsApi, wasteTypesApi } from '../api/endpoints';
+import { useSettingsStore } from '../stores/settingsStore';
 
 function genDN() {
   return 'DN-' + String(Math.floor(Math.random() * 90000) + 10000);
@@ -8,6 +9,7 @@ function genDN() {
 
 export default function DepotScannerPage() {
   const qc = useQueryClient();
+  const settings = useSettingsStore(s => s.settings);
 
   /* ─── state ─── */
   const [scanId, setScanId] = useState('');
@@ -45,7 +47,20 @@ export default function DepotScannerPage() {
   const depots: any[] = Array.isArray(depotsData) ? depotsData : (depotsData as any)?.data || [];
   const logs: any[] = logData?.data || [];
 
-  const wasteTypes = Array.isArray(wasteTypesData) ? wasteTypesData : (wasteTypesData as any)?.data || [];
+  // Use DB waste types if available, otherwise fall back to Settings categories
+  const dbTypes = Array.isArray(wasteTypesData) ? wasteTypesData : (wasteTypesData as any)?.data || [];
+  const wasteTypes = useMemo(() => {
+    if (dbTypes.length > 0) return dbTypes;
+    // Fallback: convert settings categories to the same shape
+    return settings.wasteCategories.map((cat) => ({
+      id: cat.id,
+      name: cat.name,
+      code: cat.code,
+      colour: cat.color,
+      unit: 'kg',
+      pricePerUnit: cat.pricePerKg,
+    }));
+  }, [dbTypes, settings.wasteCategories]);
 
   /* today's logs */
   const today = new Date().toISOString().slice(0, 10);
@@ -124,18 +139,23 @@ export default function DepotScannerPage() {
       
       const promises = activeCats.map((c: any) => {
         const qty = wasteInputs[c.id];
+        const selectedDepot = depots.find((d: any) => d.id === depotId);
+        // Settings categories have IDs like "WC-001" (not UUIDs) — send null for wasteTypeId
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(c.id);
         const noteStr = [
           `Ref: ${dnRef}`,
+          `Category: ${c.name}`,
+          selectedDepot ? `Depot: ${selectedDepot.name}` : '',
           notes ? `Notes: ${notes}` : '',
         ].filter(Boolean).join(' | ');
 
         return wasteLogsApi.create({
           date: today,
-          siteId: depotId || null,
+          siteId: foundEmployee.siteId || null,
           quantity: qty,
           unit: c.unit || 'kg',
-          pricePerUnit: c.pricePerUnit,
-          wasteTypeId: c.id,
+          pricePerUnit: c.pricePerUnit || 0,
+          wasteTypeId: isUuid ? c.id : null,
           collectorId: foundEmployee.id,
           notes: noteStr,
         });
@@ -147,9 +167,10 @@ export default function DepotScannerPage() {
       setSuccessMsg(`Collection logged — ${totalKg} kg · R ${totalValue.toFixed(2)} · ${dnRef}`);
       resetForm();
       setTimeout(() => setSuccessMsg(null), 5000);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to submit collection.");
+    } catch (err: any) {
+      console.error('Depot scanner error:', err);
+      const msg = err?.response?.data?.error || err?.message || 'Failed to submit collection.';
+      alert(msg);
     } finally {
       setIsSubmitting(false);
     }

@@ -11,6 +11,10 @@ export interface User {
   avatar?: string;
   modules?: string[];
   roleName?: string;
+  depotId?: string;
+  depotName?: string;
+  managedSiteIds?: string[];
+  isDepotManager?: boolean;
 }
 
 // ── Sites ──

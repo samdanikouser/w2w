@@ -4,8 +4,9 @@ import { employeesApi, attendanceApi, sitesApi, type AttendancePayload } from '.
 import { Plus, X } from 'lucide-react';
 import { StatCard, FilterInput } from './SitesPage';
 import { exportCsv } from '../utils/csv';
+import { usePermissions } from '../hooks/usePermissions';
 
-type Cell = 'P' | 'L' | 'A' | 'O' | 'H' | 'W' | '';
+type Cell = 'P' | 'L' | 'A' | 'O' | 'H' | '';
 
 const STATUS_TO_CELL: Record<string, Cell> = {
   PRESENT: 'P',
@@ -20,7 +21,7 @@ const CELL_COLOR: Record<Cell, string> = {
   A: 'var(--color-red)',
   O: 'var(--color-purple)',
   H: 'var(--color-w2w)',
-  W: 'var(--color-text3)',
+
   '': 'var(--color-text3)',
 };
 
@@ -44,6 +45,7 @@ const fmtTime = (dt: string | null | undefined): string => {
 
 export default function AttendancePage() {
   const qc = useQueryClient();
+  const { canCreate } = usePermissions();
   const today = new Date();
   const todayStr = today.toISOString().slice(0, 10);
 
@@ -91,8 +93,6 @@ export default function AttendancePage() {
       .filter((e: any) => e.status === 'ACTIVE')
       .map((e: any) => {
         const cells: Cell[] = days.map((d) => {
-          const dow = new Date(year, monthNum - 1, d).getDay();
-          if (dow === 0 || dow === 6) return 'W';
           const rec = records.find(
             (r: any) =>
               r.employeeId === e.id &&
@@ -105,7 +105,8 @@ export default function AttendancePage() {
         const late = cells.filter((c) => c === 'L').length;
         const absent = cells.filter((c) => c === 'A').length;
         const leave = cells.filter((c) => c === 'O').length;
-        return { emp: e, cells, present, late, absent, leave };
+        const halfDay = cells.filter((c) => c === 'H').length;
+        return { emp: e, cells, present, late, absent, leave, halfDay };
       });
   }, [employees, records, days, year, monthNum]);
 
@@ -113,9 +114,10 @@ export default function AttendancePage() {
     !search || `${r.emp.firstName} ${r.emp.lastName} ${r.emp.empNo}`.toLowerCase().includes(search.toLowerCase()),
   );
 
-  const total = grid.reduce((s, r) => s + r.present + r.late + r.absent + r.leave, 0);
-  const totalPresent = grid.reduce((s, r) => s + r.present, 0);
-  const attendancePct = total > 0 ? Math.round((totalPresent / total) * 100) : 0;
+  // Attended = Present + Late + Half-day (they showed up)
+  const totalAttended = grid.reduce((s, r) => s + r.present + r.late + r.halfDay, 0);
+  const totalRecorded = grid.reduce((s, r) => s + r.present + r.late + r.absent + r.leave + r.halfDay, 0);
+  const attendancePct = totalRecorded > 0 ? Math.round((totalAttended / totalRecorded) * 100) : 0;
 
   // ── Today's check-in records (matching prototype's table view) ──
   const todayRecords = useMemo(() => {
@@ -156,7 +158,7 @@ export default function AttendancePage() {
           <div className="ps">Check-in and check-out records · All sites</div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button className="btn btn-accent" onClick={() => setShowAdd(true)}><Plus size={13} /> Record Attendance</button>
+          {canCreate('attendance') && <button className="btn btn-accent" onClick={() => setShowAdd(true)}><Plus size={13} /> Record Attendance</button>}
           <button className="btn btn-ghost" onClick={() => exportCsv(`attendance-${month}`, todayRecords.map((r: any) => {
             const emp = employees.find((e: any) => e.id === r.employeeId);
             const hrs = r.clockIn && r.clockOut
@@ -186,9 +188,9 @@ export default function AttendancePage() {
       {/* ── Stat Cards ── */}
       <div className="stats-grid">
         <StatCard label="Attendance Rate" value={attendancePct + '%'} sub="Across the month" icon="📅" rail="sc-green" color="var(--color-green)" />
-        <StatCard label="Total Present" value={String(totalPresent)} sub="Person-days" icon="✅" rail="sc-blue" color="var(--color-w2w)" />
+        <StatCard label="Total Attended" value={String(totalAttended)} sub="Present + Late + Half-day" icon="✅" rail="sc-blue" color="var(--color-w2w)" />
         <StatCard label="Late Arrivals" value={String(grid.reduce((s, r) => s + r.late, 0))} sub="This month" icon="⏰" rail="sc-amber" color="var(--color-amber)" />
-        <StatCard label="Absences" value={String(grid.reduce((s, r) => s + r.absent, 0))} sub="Unauthorised" icon="❌" rail="sc-red" color="var(--color-red)" />
+        <StatCard label="Absences" value={String(grid.reduce((s, r) => s + r.absent, 0))} sub="This month" icon="❌" rail="sc-red" color="var(--color-red)" />
       </div>
 
       {/* ── Filter Bar (matches prototype) ── */}
@@ -382,7 +384,7 @@ export default function AttendancePage() {
         </div>
         <div className="cf">
           <span style={{ fontSize: 10, color: 'var(--color-text3)' }}>
-            Legend: <b style={{ color: 'var(--color-green)' }}>P</b> Present · <b style={{ color: 'var(--color-amber)' }}>L</b> Late · <b style={{ color: 'var(--color-red)' }}>A</b> Absent · <b style={{ color: 'var(--color-purple)' }}>O</b> On leave · <b style={{ color: 'var(--color-w2w)' }}>H</b> Half-day · W Weekend · · No record
+            Legend: <b style={{ color: 'var(--color-green)' }}>P</b> Present · <b style={{ color: 'var(--color-amber)' }}>L</b> Late · <b style={{ color: 'var(--color-red)' }}>A</b> Absent · <b style={{ color: 'var(--color-purple)' }}>O</b> On leave · <b style={{ color: 'var(--color-w2w)' }}>H</b> Half-day · · No record
           </span>
         </div>
       </div>

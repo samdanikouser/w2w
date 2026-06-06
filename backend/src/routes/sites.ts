@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, requireAction, type AuthRequest } from '../middleware/auth.js';
+import { applySiteScope } from '../middleware/siteScoping.js';
 import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
@@ -30,6 +31,7 @@ const siteSchema = z.object({
   municipalityId: z.string().optional().default(''),
   subRegionId: z.string().optional().default(''),
   depotId: emptyToNullUuid,
+  cooperativeId: emptyToNullUuid,
   currentSkipBinCount: z.number().optional().nullish(),
   gateFee: z.number().optional().nullish(),
   weighbridge: emptyToNull,
@@ -44,8 +46,8 @@ router.get('/', async (req: AuthRequest, res, next) => {
     const { depot_id } = req.query;
     const where: any = {};
     const hasAdminAccess = req.userModules?.some(m => ['w2w-settings', 'facilities', 'sites'].includes(m));
-    if (req.userSiteId && !hasAdminAccess) {
-      where.id = req.userSiteId;
+    if (!hasAdminAccess) {
+      applySiteScope(req, where, 'id');
     }
     if (depot_id) {
       where.depotId = String(depot_id);
@@ -54,7 +56,11 @@ router.get('/', async (req: AuthRequest, res, next) => {
     const sites = await prisma.site.findMany({
       where,
       orderBy: { name: 'asc' },
-      include: { _count: { select: { employees: true, wasteLogs: true } } },
+      include: {
+        _count: { select: { employees: true, wasteLogs: true } },
+        cooperative: { select: { id: true, name: true } },
+        depot: { select: { id: true, name: true } },
+      },
     });
     res.json(sites);
   } catch (err) {
@@ -63,7 +69,7 @@ router.get('/', async (req: AuthRequest, res, next) => {
 });
 
 // ── POST /api/sites ──
-router.post('/', async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('facilities'), requireAction('facilities', 'create'), async (req: AuthRequest, res, next) => {
   try {
     const data = siteSchema.parse(req.body);
     const site = await prisma.site.create({
@@ -74,6 +80,7 @@ router.post('/', async (req: AuthRequest, res, next) => {
         status: data.status as any, 
         type: data.type as any,
         depotId: data.depotId || null,
+        cooperativeId: data.cooperativeId || null,
         currentSkipBinCount: data.currentSkipBinCount || null,
         gateFee: data.gateFee || null,
         weighbridge: data.weighbridge || null
@@ -91,7 +98,7 @@ router.post('/', async (req: AuthRequest, res, next) => {
 });
 
 // ── PUT /api/sites/:id ──
-router.put('/:id', async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('facilities'), requireAction('facilities', 'edit'), async (req: AuthRequest, res, next) => {
   try {
     const data = siteSchema.partial().parse(req.body);
     const site = await prisma.site.update({
@@ -110,7 +117,7 @@ router.put('/:id', async (req: AuthRequest, res, next) => {
 });
 
 // ── DELETE /api/sites/:id ──
-router.delete('/:id', async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('facilities'), requireAction('facilities', 'delete'), async (req: AuthRequest, res, next) => {
   try {
     await prisma.site.delete({ where: { id: req.params.id as string } });
 

@@ -10,7 +10,7 @@ import {
   auditLogsApi, employeesApi, rolesApi, usersApi,
   type CustomRolePayload, type SystemRole, type CreateUserPayload, type UpdateUserPayload,
 } from '../api/endpoints';
-import { ALL_MODULES, getModulesBySection } from '../config/moduleRegistry';
+import { ALL_MODULES, getModulesBySection, getAllPermissions } from '../config/moduleRegistry';
 import { RowBtn } from './SitesPage';
 import PasswordInput from '../components/ui/PasswordInput';
 
@@ -398,7 +398,7 @@ export function UsersTab({ onToast }: { onToast: (t: { message: string; tone: 'g
                   <select className="fc" value={form.customRoleId || ''} onChange={(e) => setForm({ ...form, customRoleId: e.target.value || null })}>
                     <option value="">— None (Field Worker default) —</option>
                     {(roles as any[]).filter((r: any) => r.isActive).map((r: any) => (
-                      <option key={r.id} value={r.id}>{r.name} ({r.systemRole.replace(/_/g, ' ')})</option>
+                      <option key={r.id} value={r.id}>{r.name}</option>
                     ))}
                   </select>
                   {(roles as any[]).length === 0 && (
@@ -519,7 +519,7 @@ export function RolesTab({ onToast }: { onToast: (t: { message: string; tone: 'g
               (roles as any[]).map((r: any) => (
                 <tr key={r.id}>
                   <td style={{ fontWeight: 700 }}>{r.name}</td>
-                  <td style={{ fontSize: 11, color: 'var(--color-text2)' }}>{(r.modules?.length ?? 0)} modules</td>
+                  <td style={{ fontSize: 11, color: 'var(--color-text2)' }}>{(() => { const mods = r.modules || []; const viewCount = mods.filter((p: string) => !p.includes(':')).length; const actionCount = mods.filter((p: string) => p.includes(':')).length; return `${viewCount} module${viewCount === 1 ? '' : 's'} · ${actionCount} action${actionCount === 1 ? '' : 's'}`; })()}</td>
                   <td style={{ fontSize: 11, color: 'var(--color-text2)' }}>{r.description || '—'}</td>
                   <td style={{ fontWeight: 600 }}>{r._count?.users ?? 0}</td>
                   <td><span className={r.isActive ? 'badge bg' : 'badge bk'}>{r.isActive ? 'Active' : 'Disabled'}</span></td>
@@ -560,43 +560,124 @@ export function RolesTab({ onToast }: { onToast: (t: { message: string; tone: 'g
                 <div className="full">
                   <div className="fg">
                     <label className="fl">Module Access</label>
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
                       <button type="button" className="btn btn-ghost" style={{ fontSize: 10, padding: '4px 8px' }}
-                        onClick={() => setForm({ ...form, modules: ALL_MODULES.map(m => m.id) })}>
+                        onClick={() => setForm({ ...form, modules: getAllPermissions() })}>
                         Select All
                       </button>
                       <button type="button" className="btn btn-ghost" style={{ fontSize: 10, padding: '4px 8px' }}
                         onClick={() => setForm({ ...form, modules: [] })}>
                         Deselect All
                       </button>
+                      <button type="button" className="btn btn-ghost" style={{ fontSize: 10, padding: '4px 8px', borderColor: 'var(--color-w2w-light)', color: 'var(--color-w2w)' }}
+                        onClick={() => setForm({ ...form, modules: getAllPermissions() })}>
+                        ✦ Full Access
+                      </button>
+                      <button type="button" className="btn btn-ghost" style={{ fontSize: 10, padding: '4px 8px', borderColor: 'var(--color-w2w-light)', color: 'var(--color-w2w)' }}
+                        onClick={() => setForm({ ...form, modules: ALL_MODULES.map(m => m.id) })}>
+                        👁 View Only
+                      </button>
                     </div>
-                    <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 8, padding: 12 }}>
+                    <div style={{ maxHeight: 380, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 8 }}>
+                      {/* Header row */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px 56px 56px 56px 56px', padding: '8px 12px', borderBottom: '2px solid var(--color-border)', background: 'var(--color-bg2)', position: 'sticky', top: 0, zIndex: 1 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Module</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center' }}>View</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center' }}>Add</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center' }}>Edit</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center' }}>Delete</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center' }}>Approve</div>
+                      </div>
                       {getModulesBySection().map(({ section, modules: mods }) => (
-                        <div key={section} style={{ marginBottom: 12 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+                        <div key={section}>
+                          {/* Section header */}
+                          <div style={{ padding: '8px 12px 4px', fontSize: 10, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.08em', background: 'var(--color-bg2)', borderBottom: '1px solid var(--color-border)' }}>
                             {section}
                           </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            {mods.map((m) => (
-                              <label key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer', padding: '4px 0' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={(form.modules || []).includes(m.id)}
-                                  onChange={(e) => {
-                                    const current = form.modules || [];
-                                    setForm({
-                                      ...form,
-                                      modules: e.target.checked
-                                        ? [...current, m.id]
-                                        : current.filter((id: string) => id !== m.id),
-                                    });
-                                  }}
-                                  style={{ width: 14, height: 14, accentColor: 'var(--color-accent)' }}
-                                />
-                                {m.label}
-                              </label>
-                            ))}
-                          </div>
+                          {mods.map((m, idx) => {
+                            const perms = form.modules || [];
+                            const hasView = perms.includes(m.id);
+                            const togglePerm = (perm: string) => {
+                              const current = form.modules || [];
+                              setForm({
+                                ...form,
+                                modules: current.includes(perm)
+                                  ? current.filter((p: string) => p !== perm)
+                                  : [...current, perm],
+                              });
+                            };
+                            const toggleView = () => {
+                              const current = form.modules || [];
+                              if (hasView) {
+                                // Remove view + all actions for this module
+                                const actionPerms = m.actions.map(a => `${m.id}:${a}`);
+                                setForm({
+                                  ...form,
+                                  modules: current.filter((p: string) => p !== m.id && !actionPerms.includes(p)),
+                                });
+                              } else {
+                                setForm({ ...form, modules: [...current, m.id] });
+                              }
+                            };
+                            return (
+                              <div
+                                key={m.id}
+                                style={{
+                                  display: 'grid', gridTemplateColumns: '1fr 56px 56px 56px 56px 56px',
+                                  padding: '6px 12px', alignItems: 'center',
+                                  background: idx % 2 === 1 ? 'var(--color-bg2)' : 'transparent',
+                                  borderBottom: '1px solid var(--color-border)',
+                                }}
+                              >
+                                <div style={{ fontSize: 12, fontWeight: 500, color: hasView ? 'var(--color-text)' : 'var(--color-text3)' }}>{m.label}</div>
+                                {/* View */}
+                                <div style={{ textAlign: 'center' }}>
+                                  <input type="checkbox" checked={hasView} onChange={toggleView}
+                                    style={{ width: 15, height: 15, accentColor: 'var(--color-accent)', cursor: 'pointer' }} />
+                                </div>
+                                {/* Add (create) */}
+                                <div style={{ textAlign: 'center' }}>
+                                  {m.actions.includes('create') ? (
+                                    <input type="checkbox" checked={perms.includes(`${m.id}:create`)} disabled={!hasView}
+                                      onChange={() => togglePerm(`${m.id}:create`)}
+                                      style={{ width: 15, height: 15, accentColor: 'var(--color-accent)', cursor: hasView ? 'pointer' : 'not-allowed', opacity: hasView ? 1 : 0.35 }} />
+                                  ) : (
+                                    <span style={{ color: 'var(--color-text3)', fontSize: 11 }}>—</span>
+                                  )}
+                                </div>
+                                {/* Edit */}
+                                <div style={{ textAlign: 'center' }}>
+                                  {m.actions.includes('edit') ? (
+                                    <input type="checkbox" checked={perms.includes(`${m.id}:edit`)} disabled={!hasView}
+                                      onChange={() => togglePerm(`${m.id}:edit`)}
+                                      style={{ width: 15, height: 15, accentColor: 'var(--color-accent)', cursor: hasView ? 'pointer' : 'not-allowed', opacity: hasView ? 1 : 0.35 }} />
+                                  ) : (
+                                    <span style={{ color: 'var(--color-text3)', fontSize: 11 }}>—</span>
+                                  )}
+                                </div>
+                                {/* Delete */}
+                                <div style={{ textAlign: 'center' }}>
+                                  {m.actions.includes('delete') ? (
+                                    <input type="checkbox" checked={perms.includes(`${m.id}:delete`)} disabled={!hasView}
+                                      onChange={() => togglePerm(`${m.id}:delete`)}
+                                      style={{ width: 15, height: 15, accentColor: 'var(--color-accent)', cursor: hasView ? 'pointer' : 'not-allowed', opacity: hasView ? 1 : 0.35 }} />
+                                  ) : (
+                                    <span style={{ color: 'var(--color-text3)', fontSize: 11 }}>—</span>
+                                  )}
+                                </div>
+                                {/* Approve */}
+                                <div style={{ textAlign: 'center' }}>
+                                  {m.actions.includes('approve') ? (
+                                    <input type="checkbox" checked={perms.includes(`${m.id}:approve`)} disabled={!hasView}
+                                      onChange={() => togglePerm(`${m.id}:approve`)}
+                                      style={{ width: 15, height: 15, accentColor: 'var(--color-accent)', cursor: hasView ? 'pointer' : 'not-allowed', opacity: hasView ? 1 : 0.35 }} />
+                                  ) : (
+                                    <span style={{ color: 'var(--color-text3)', fontSize: 11 }}>—</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       ))}
                     </div>

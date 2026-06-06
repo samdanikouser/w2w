@@ -4,6 +4,7 @@ import { transactionsApi, sitesApi, type TransactionPayload } from '../api/endpo
 import { Plus, Download, TrendingUp, TrendingDown, X, Edit2, Trash2, Lock, Unlock } from 'lucide-react';
 import { StatCard, FilterInput, RowBtn } from './SitesPage';
 import { exportCsv } from '../utils/csv';
+import { usePermissions } from '../hooks/usePermissions';
 import {
   loadPLTypes, loadPLCategories, loadPLCostCentres,
   loadLockedMonths, saveLockedMonths,
@@ -18,6 +19,7 @@ const EMPTY: TransactionPayload = {
 
 export default function PLRegisterPage() {
   const qc = useQueryClient();
+  const { canCreate, canEdit, canDelete } = usePermissions();
 
   // ── Filters ──
   const [search, setSearch] = useState('');
@@ -183,7 +185,7 @@ export default function PLRegisterPage() {
           <div className="ps">{tx.length} transactions · period to date</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-accent" onClick={openAdd}><Plus size={13} /> Add Entry</button>
+          {canCreate('pl-register') && <button className="btn btn-accent" onClick={openAdd}><Plus size={13} /> Add Entry</button>}
           <button className="btn btn-ghost" onClick={() => setLockModal(true)}><Lock size={13} /> Lock Month</button>
           <button className="btn btn-ghost" onClick={() => exportCsv('pl-register', filtered, [
             { key: 'date', label: 'Date', map: (r: any) => r.date ? new Date(r.date).toISOString().slice(0, 10) : '' },
@@ -196,15 +198,43 @@ export default function PLRegisterPage() {
         </div>
       </div>
 
-      {/* ── Stat Cards ── */}
-      <div className="stats-grid mt14">
-        <StatCard label="Total Revenue" value={fmt(summary.totalRevenue)} sub={`${tx.filter((t) => t.type === 'REVENUE').length} entries`} icon="💰" rail="sc-green" color="var(--color-green)" />
-        <StatCard label="Total Expenditure" value={fmt(summary.totalExpense)} sub={`${tx.filter((t) => t.type === 'EXPENSE').length} entries`} icon="💸" rail="sc-red" color="var(--color-red)" />
-        <StatCard label="Net Position" value={fmt(summary.net)} sub={summary.net >= 0 ? 'Surplus' : 'Deficit'} icon={summary.net >= 0 ? '📈' : '📉'} rail={summary.net >= 0 ? 'sc-green' : 'sc-red'} color={summary.net >= 0 ? 'var(--color-green)' : 'var(--color-red)'} />
-        <StatCard label="Margin %" value={margin + '%'} sub="Net / Revenue" icon="📊" rail="sc-blue" color="var(--color-w2w)" />
+      {/* ── Global Filter Bar ── */}
+      <div className="card mb14" style={{ padding: '12px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 4 }}>Filters</div>
+          <FilterInput value={search} onChange={setSearch} placeholder="Search…" />
+          <select className="fc" style={{ width: 140 }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            <option value="all">All types</option>
+            <option value="REVENUE">Revenue</option>
+            <option value="EXPENSE">Expense</option>
+          </select>
+          <select className="fc" style={{ width: 150 }} value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)}>
+            <option value="all">All months</option>
+            {availableMonths.map((m) => (
+              <option key={m} value={m}>{fmtMonth(m)}{lockedMonths.includes(m) ? ' 🔒' : ''}</option>
+            ))}
+          </select>
+          <select className="fc" style={{ width: 180 }} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+            <option value="all">All categories</option>
+            {availableCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          {(search || typeFilter !== 'all' || monthFilter !== 'all' || categoryFilter !== 'all') && (
+            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => { setSearch(''); setTypeFilter('all'); setMonthFilter('all'); setCategoryFilter('all'); }}>
+              <X size={12} /> Clear
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── Income & Expenditure Statements ── */}
+      {/* ── Stat Cards (from filtered data) ── */}
+      <div className="stats-grid mt14">
+        <StatCard label="Total Revenue" value={fmt(filtered.filter(t => t.type === 'REVENUE').reduce((s, t) => s + Math.abs(t.amount), 0))} sub={`${filtered.filter(t => t.type === 'REVENUE').length} entries`} icon="💰" rail="sc-green" color="var(--color-green)" />
+        <StatCard label="Total Expenditure" value={fmt(filtered.filter(t => t.type === 'EXPENSE').reduce((s, t) => s + Math.abs(t.amount), 0))} sub={`${filtered.filter(t => t.type === 'EXPENSE').length} entries`} icon="💸" rail="sc-red" color="var(--color-red)" />
+        <StatCard label="Net Position" value={fmt(filtered.reduce((s, t) => s + (t.type === 'REVENUE' ? Math.abs(t.amount) : -Math.abs(t.amount)), 0))} sub={filtered.reduce((s, t) => s + (t.type === 'REVENUE' ? Math.abs(t.amount) : -Math.abs(t.amount)), 0) >= 0 ? 'Surplus' : 'Deficit'} icon={filtered.reduce((s, t) => s + (t.type === 'REVENUE' ? Math.abs(t.amount) : -Math.abs(t.amount)), 0) >= 0 ? '📈' : '📉'} rail={filtered.reduce((s, t) => s + (t.type === 'REVENUE' ? Math.abs(t.amount) : -Math.abs(t.amount)), 0) >= 0 ? 'sc-green' : 'sc-red'} color={filtered.reduce((s, t) => s + (t.type === 'REVENUE' ? Math.abs(t.amount) : -Math.abs(t.amount)), 0) >= 0 ? 'var(--color-green)' : 'var(--color-red)'} />
+        <StatCard label="Margin %" value={(() => { const r = filtered.filter(t => t.type === 'REVENUE').reduce((s, t) => s + Math.abs(t.amount), 0); const e = filtered.filter(t => t.type === 'EXPENSE').reduce((s, t) => s + Math.abs(t.amount), 0); return r > 0 ? Math.round(((r - e) / r) * 100) + '%' : '0%'; })()} sub="Net / Revenue" icon="📊" rail="sc-blue" color="var(--color-w2w)" />
+      </div>
+
+      {/* ── Income & Expenditure Statements (from filtered data) ── */}
       <div className="g2" style={{ marginBottom: 20 }}>
         {/* Income Statement */}
         <div className="card">
@@ -213,8 +243,9 @@ export default function PLRegisterPage() {
           <tbody>
             {(() => {
               const revByCat: Record<string, number> = {};
-              tx.filter(t => t.type === 'REVENUE').forEach(t => { revByCat[t.category] = (revByCat[t.category] || 0) + Math.abs(t.amount); });
+              filtered.filter(t => t.type === 'REVENUE').forEach(t => { revByCat[t.category] = (revByCat[t.category] || 0) + Math.abs(t.amount); });
               const entries = Object.entries(revByCat);
+              const totalRev = filtered.filter(t => t.type === 'REVENUE').reduce((s, t) => s + Math.abs(t.amount), 0);
               if (!entries.length) return <tr><td colSpan={2} style={{ textAlign: 'center', color: 'var(--color-text3)', padding: 12 }}>No income entries</td></tr>;
               return (<>
                 {entries.map(([cat, amt]) => (
@@ -225,7 +256,7 @@ export default function PLRegisterPage() {
                 ))}
                 <tr style={{ background: 'var(--color-surface3)', fontWeight: 700 }}>
                   <td>TOTAL INCOME</td>
-                  <td style={{ color: 'var(--color-green)', textAlign: 'right' }}>R {Math.round(summary.totalRevenue).toLocaleString()}</td>
+                  <td style={{ color: 'var(--color-green)', textAlign: 'right' }}>R {Math.round(totalRev).toLocaleString()}</td>
                 </tr>
               </>);
             })()}
@@ -239,8 +270,11 @@ export default function PLRegisterPage() {
           <tbody>
             {(() => {
               const expByCat: Record<string, number> = {};
-              tx.filter(t => t.type === 'EXPENSE').forEach(t => { expByCat[t.category] = (expByCat[t.category] || 0) + Math.abs(t.amount); });
+              filtered.filter(t => t.type === 'EXPENSE').forEach(t => { expByCat[t.category] = (expByCat[t.category] || 0) + Math.abs(t.amount); });
               const entries = Object.entries(expByCat);
+              const totalExp = filtered.filter(t => t.type === 'EXPENSE').reduce((s, t) => s + Math.abs(t.amount), 0);
+              const totalRev = filtered.filter(t => t.type === 'REVENUE').reduce((s, t) => s + Math.abs(t.amount), 0);
+              const net = totalRev - totalExp;
               if (!entries.length) return <tr><td colSpan={2} style={{ textAlign: 'center', color: 'var(--color-text3)', padding: 12 }}>No expense entries</td></tr>;
               return (<>
                 {entries.map(([cat, amt]) => (
@@ -251,11 +285,11 @@ export default function PLRegisterPage() {
                 ))}
                 <tr style={{ background: 'var(--color-surface3)', fontWeight: 700 }}>
                   <td>TOTAL EXPENDITURE</td>
-                  <td style={{ color: 'var(--color-red)', textAlign: 'right' }}>R {Math.round(summary.totalExpense).toLocaleString()}</td>
+                  <td style={{ color: 'var(--color-red)', textAlign: 'right' }}>R {Math.round(totalExp).toLocaleString()}</td>
                 </tr>
                 <tr style={{ background: 'var(--color-w2w-light)', fontWeight: 700 }}>
-                  <td>{summary.net >= 0 ? 'NET SURPLUS' : 'NET DEFICIT'}</td>
-                  <td style={{ color: summary.net >= 0 ? 'var(--color-green)' : 'var(--color-red)', textAlign: 'right', fontSize: 14 }}>R {Math.round(Math.abs(summary.net)).toLocaleString()}</td>
+                  <td>{net >= 0 ? 'NET SURPLUS' : 'NET DEFICIT'}</td>
+                  <td style={{ color: net >= 0 ? 'var(--color-green)' : 'var(--color-red)', textAlign: 'right', fontSize: 14 }}>R {Math.round(Math.abs(net)).toLocaleString()}</td>
                 </tr>
               </>);
             })()}
@@ -266,24 +300,9 @@ export default function PLRegisterPage() {
       {/* ── P&L Statement ── */}
       <div className="card">
         <div className="ch">
-          <div className="ct">P&L Statement</div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <FilterInput value={search} onChange={setSearch} placeholder="Search…" />
-            <select className="fc" style={{ width: 140 }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-              <option value="all">All types</option>
-              <option value="REVENUE">Revenue</option>
-              <option value="EXPENSE">Expense</option>
-            </select>
-            <select className="fc" style={{ width: 150 }} value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)}>
-              <option value="all">All months</option>
-              {availableMonths.map((m) => (
-                <option key={m} value={m}>{fmtMonth(m)}{lockedMonths.includes(m) ? ' 🔒' : ''}</option>
-              ))}
-            </select>
-            <select className="fc" style={{ width: 180 }} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-              <option value="all">All categories</option>
-              {availableCategories.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+          <div>
+            <div className="ct">P&L Statement</div>
+            <div className="cs">Showing {filtered.length} of {tx.length} entries</div>
           </div>
         </div>
         <div className="tw">
@@ -322,8 +341,8 @@ export default function PLRegisterPage() {
                             </>
                           ) : (
                             <>
-                              <RowBtn title="Edit" onClick={() => openEdit(t)}><Edit2 size={13} /></RowBtn>
-                              <RowBtn title="Delete" danger onClick={() => remove(t)}><Trash2 size={13} /></RowBtn>
+                              {canEdit('pl-register') && <RowBtn title="Edit" onClick={() => openEdit(t)}><Edit2 size={13} /></RowBtn>}
+                              {canDelete('pl-register') && <RowBtn title="Delete" danger onClick={() => remove(t)}><Trash2 size={13} /></RowBtn>}
                             </>
                           )}
                         </div>

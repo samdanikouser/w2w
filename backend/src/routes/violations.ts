@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, requireAction, type AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate);
@@ -15,9 +15,17 @@ const violationSchema = z.object({
   notes: z.string().default(''),
 });
 
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req: AuthRequest, res, next) => {
   try {
+    const where: any = {};
+    // Apply site scoping via employee relationship
+    if (req.managedSiteIds && req.managedSiteIds.length > 0) {
+      where.employee = { ...where.employee, siteId: { in: req.managedSiteIds } };
+    } else if (req.userSiteId) {
+      where.employee = { ...where.employee, siteId: req.userSiteId };
+    }
     const records = await prisma.violation.findMany({
+      where,
       orderBy: { date: 'desc' },
       include: {
         employee: { select: { id: true, firstName: true, lastName: true, empNo: true } },
@@ -30,7 +38,7 @@ router.get('/', async (_req, res, next) => {
   }
 });
 
-router.post('/', requireModule('violations'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('violations'), requireAction('violations', 'create'), async (req: AuthRequest, res, next) => {
   try {
     const d = violationSchema.parse(req.body);
     const v = await prisma.violation.create({
@@ -53,7 +61,7 @@ router.post('/', requireModule('violations'), async (req: AuthRequest, res, next
   }
 });
 
-router.put('/:id', requireModule('violations'), async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('violations'), requireAction('violations', 'edit'), async (req: AuthRequest, res, next) => {
   try {
     const d = violationSchema.partial().parse(req.body);
     const v = await prisma.violation.update({
@@ -71,7 +79,7 @@ router.put('/:id', requireModule('violations'), async (req: AuthRequest, res, ne
   }
 });
 
-router.delete('/:id', requireModule('violations'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('violations'), requireAction('violations', 'delete'), async (req: AuthRequest, res, next) => {
   try {
     await prisma.violation.delete({ where: { id: req.params.id as string } });
     res.json({ message: 'Violation deleted' });

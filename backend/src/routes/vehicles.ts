@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, requireAction, type AuthRequest } from '../middleware/auth.js';
+import { applySiteScope, enforceCreateScope, getAllowedSiteIds } from '../middleware/siteScoping.js';
 import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
@@ -23,9 +24,12 @@ const vehicleSchema = z.object({
 });
 
 // ── GET /api/vehicles ──
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req: AuthRequest, res, next) => {
   try {
+    const where: any = {};
+    applySiteScope(req, where);
     const vehicles = await prisma.vehicle.findMany({
+      where,
       orderBy: { registration: 'asc' },
       include: { site: { select: { id: true, name: true } } },
     });
@@ -36,7 +40,7 @@ router.get('/', async (_req, res, next) => {
 });
 
 // ── POST /api/vehicles ──
-router.post('/', requireModule('vehicles'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('vehicles'), requireAction('vehicles', 'create'), enforceCreateScope(), async (req: AuthRequest, res, next) => {
   try {
     const data = vehicleSchema.parse(req.body);
     const v = await prisma.vehicle.create({
@@ -67,8 +71,16 @@ router.post('/', requireModule('vehicles'), async (req: AuthRequest, res, next) 
 });
 
 // ── PUT /api/vehicles/:id ──
-router.put('/:id', requireModule('vehicles'), async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('vehicles'), requireAction('vehicles', 'edit'), async (req: AuthRequest, res, next) => {
   try {
+    const allowed = getAllowedSiteIds(req);
+    if (allowed.length > 0) {
+      const existing = await prisma.vehicle.findUnique({ where: { id: req.params.id as string }, select: { siteId: true } });
+      if (existing?.siteId && !allowed.includes(existing.siteId)) {
+        return res.status(403).json({ error: 'You do not have access to this resource' });
+      }
+    }
+
     const data = vehicleSchema.partial().parse(req.body);
     const v = await prisma.vehicle.update({
       where: { id: req.params.id as string },
@@ -91,8 +103,16 @@ router.put('/:id', requireModule('vehicles'), async (req: AuthRequest, res, next
 });
 
 // ── DELETE /api/vehicles/:id ──
-router.delete('/:id', requireModule('vehicles'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('vehicles'), requireAction('vehicles', 'delete'), async (req: AuthRequest, res, next) => {
   try {
+    const allowed = getAllowedSiteIds(req);
+    if (allowed.length > 0) {
+      const existing = await prisma.vehicle.findUnique({ where: { id: req.params.id as string }, select: { siteId: true } });
+      if (existing?.siteId && !allowed.includes(existing.siteId)) {
+        return res.status(403).json({ error: 'You do not have access to this resource' });
+      }
+    }
+
     await prisma.vehicle.delete({ where: { id: req.params.id as string } });
 
     await prisma.auditLog.create({

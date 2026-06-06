@@ -18,11 +18,11 @@ w2w/
 
 ```bash
 cd backend
-cp .env.example .env       # fill in DATABASE_URL, JWT_SECRET, SEED_ADMIN_*
+cp .env.example .env       # fill in DATABASE_URL, JWT_SECRET, etc.
 npm install
 npx prisma migrate dev --name init
 npx prisma generate
-npx prisma db seed         # creates the bootstrap admin from env vars
+npx prisma db seed         # creates base system roles
 npm run dev
 ```
 
@@ -32,9 +32,7 @@ Required env vars (`backend/.env`):
 | --- | --- |
 | `DATABASE_URL` | Postgres connection string |
 | `JWT_SECRET` | ≥ 32 chars; server refuses to start in production without this |
-| `SEED_ADMIN_EMAIL` | Bootstrap admin login |
-| `SEED_ADMIN_PASSWORD` | ≥ 12 chars |
-| `SEED_ADMIN_NAME` | Optional, defaults to "System Administrator" |
+
 | `CORS_ORIGIN` | Frontend origin, default `http://localhost:3000` |
 | `NODE_ENV` | `development` or `production` |
 
@@ -46,12 +44,11 @@ npm install
 npm run dev
 ```
 
-Visit <http://localhost:3000>, log in with the bootstrap admin you seeded, then immediately:
+Visit <http://localhost:3000>, and register your first organization. This will automatically set up the first System Administrator account. Then:
 
 1. **Settings → Roles** — define your custom role labels (e.g. "Yard Supervisor")
 2. **Employees → Add Employee** — register staff
 3. **Settings → Users** — link an employee to a login account with a role
-4. **My Profile → Security** — change your admin password
 
 ## Modules
 
@@ -90,14 +87,24 @@ Visit <http://localhost:3000>, log in with the bootstrap admin you seeded, then 
 - Helmet + CORS + JSON body limit (2 MB) + Express rate-limit.
 - POPIA-compliant: SA ID / banking / contact fields documented as encrypted at app layer; audit-log retention controlled in Settings.
 
-## Production deployment
+## Production deployment (e.g., Render / Heroku / AWS)
 
+### Database Backup & Disaster Recovery
+A standalone backup script is included at `backend/src/scripts/backupDatabase.ts`. It creates a `pg_dump` archive and emails it to a specified address.
+You can configure a daily cron job (e.g., via Render Cron Jobs) to run:
+```bash
+cd backend && npx tsx src/scripts/backupDatabase.ts
+```
+**Required Env Vars for Backup:** `DATABASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `BACKUP_EMAIL_TO`
+
+### Deployment Steps
 1. Set all env vars in `backend/.env` (especially `JWT_SECRET` ≥ 32 chars and `SEED_ADMIN_*`).
 2. `NODE_ENV=production npx prisma migrate deploy && npx prisma db seed`.
-3. Build the frontend: `cd frontend && npm run build` → serve `dist/` behind a reverse proxy.
-4. Reverse-proxy `/api/*` to the backend on port 4000.
+3. Build the frontend: `cd frontend && npm run build` → serve `dist/` behind a reverse proxy (or build it within your Node server if unified).
+4. Run the backend using `npm run start` (which compiles `src` and runs `node dist/index.js`).
 5. Enforce HTTPS at the proxy layer.
 6. Rotate `SEED_ADMIN_PASSWORD` immediately after first login.
+7. Clean Code: Run `npx ts-prune` in the frontend to ensure no unused exports are deployed.
 
 ## License
 

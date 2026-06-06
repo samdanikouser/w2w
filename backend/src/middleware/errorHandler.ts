@@ -73,9 +73,11 @@ export function errorHandler(
   }
 
   // ── Generic fallback ──
+  // SECURITY: Only expose err.message in explicit development mode.
+  // All other environments (production, staging, undefined) get a safe generic message.
   res.status(500).json({
-    error: process.env.NODE_ENV === 'production'
-      ? 'Something went wrong. Please try again or contact support.'
-      : err.message,
+    error: process.env.NODE_ENV === 'development'
+      ? err.message
+      : 'Something went wrong. Please try again or contact support.',
   });
 }

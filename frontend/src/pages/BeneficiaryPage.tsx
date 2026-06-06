@@ -20,7 +20,7 @@ function isFieldWorker(emp: any): boolean {
 }
 
 function getPreIncome(emp: any): number {
-  return Number(emp.preIncomeMonthly) || 0;
+  return Number(emp.incomeBeforeW2W) || Number(emp.preIncomeMonthly) || 0;
 }
 
 function getCurrentIncome(emp: any): number {

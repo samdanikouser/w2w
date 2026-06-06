@@ -1,14 +1,15 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, requireAction, type AuthRequest } from '../middleware/auth.js';
+import { applySiteScope, enforceCreateScope, getAllowedSiteIds } from '../middleware/siteScoping.js';
 import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
 router.use(authenticate);
 
 const employeeSchema = z.object({
-  empNo: z.string().min(1),
+  empNo: z.string().optional(),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   idNumber: z.string().default(''),
@@ -58,6 +59,14 @@ const employeeSchema = z.object({
   uniformIssued: z.boolean().default(false),
   ppeIssued: z.boolean().default(false),
   trainingComplete: z.number().int().default(0),
+  // Vehicle Licence (SA)
+  licenceCode: z.string().default(''),
+  licenceNumber: z.string().default(''),
+  licenceExpiry: emptyToNull,
+  hasPrDP: z.boolean().default(false),
+  prdpExpiry: emptyToNull,
+  // Photo
+  photo: z.string().nullish().transform(v => v || null),
 });
 
 // ── GET /api/employees ──
@@ -69,9 +78,8 @@ router.get('/', async (req: AuthRequest, res, next) => {
     if (status && status !== 'all') where.status = status;
 
     // Enforce Depot-level sandboxing
-    if (req.userSiteId) {
-      where.siteId = req.userSiteId;
-    } else if (siteId) {
+    applySiteScope(req, where);
+    if (!where.siteId && siteId) {
       where.siteId = siteId;
     }
     if (search) {
@@ -87,7 +95,12 @@ router.get('/', async (req: AuthRequest, res, next) => {
     const [employees, total] = await Promise.all([
       prisma.employee.findMany({
         where,
-        include: { site: { select: { id: true, name: true } } },
+        include: {
+          site: { select: { id: true, name: true } },
+          trainings: {
+            include: { trainingModule: { select: { id: true, name: true, type: true } } },
+          },
+        },
         orderBy: { createdAt: 'desc' },
         skip,
         take: parseInt(limit as string),
@@ -116,14 +129,28 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // ── POST /api/employees ──
-router.post('/', requireModule('employees'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('employees'), requireAction('employees', 'create'), enforceCreateScope(), async (req: AuthRequest, res, next) => {
   try {
     const { customRoleId, loginPassword, ...data } = employeeSchema.parse(req.body);
+
+    // Auto-generate sequential empNo: W2W-001, W2W-002, etc.
+    const lastEmp = await prisma.employee.findFirst({
+      where: { empNo: { startsWith: 'W2W-' } },
+      orderBy: { empNo: 'desc' },
+      select: { empNo: true },
+    });
+    let nextNum = 1;
+    if (lastEmp?.empNo) {
+      const match = lastEmp.empNo.match(/W2W-(\d+)/);
+      if (match) nextNum = parseInt(match[1], 10) + 1;
+    }
+    const empNo = `W2W-${String(nextNum).padStart(3, '0')}`;
 
     const employee = await prisma.employee.create({
       data: {
         ...data,
-        siteId: data.siteId || null,
+        empNo,
+        siteId: data.siteId || req.userSiteId || null,
         startDate: data.startDate ? new Date(data.startDate) : null,
         status: data.status as any,
       },
@@ -162,8 +189,15 @@ router.post('/', requireModule('employees'), async (req: AuthRequest, res, next)
 });
 
 // ── PUT /api/employees/:id ──
-router.put('/:id', requireModule('employees'), async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('employees'), requireAction('employees', 'edit'), async (req: AuthRequest, res, next) => {
   try {
+    const allowed = getAllowedSiteIds(req);
+    if (allowed.length > 0) {
+      const existing = await prisma.employee.findUnique({ where: { id: req.params.id as string }, select: { siteId: true } });
+      if (existing?.siteId && !allowed.includes(existing.siteId)) {
+        return res.status(403).json({ error: 'You do not have access to this employee' });
+      }
+    }
     const { customRoleId, loginPassword, ...data } = employeeSchema.partial().parse(req.body);
 
     const employee = await prisma.employee.update({
@@ -221,8 +255,15 @@ router.put('/:id', requireModule('employees'), async (req: AuthRequest, res, nex
 });
 
 // ── DELETE /api/employees/:id ──
-router.delete('/:id', requireModule('employees'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('employees'), requireAction('employees', 'delete'), async (req: AuthRequest, res, next) => {
   try {
+    const allowed = getAllowedSiteIds(req);
+    if (allowed.length > 0) {
+      const existing = await prisma.employee.findUnique({ where: { id: req.params.id as string }, select: { siteId: true } });
+      if (existing?.siteId && !allowed.includes(existing.siteId)) {
+        return res.status(403).json({ error: 'You do not have access to this employee' });
+      }
+    }
     const employee = await prisma.employee.delete({ where: { id: req.params.id as string } });
 
     await prisma.auditLog.create({

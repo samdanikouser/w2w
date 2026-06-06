@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db.js';
-import { authenticate, requireModule, type AuthRequest } from '../middleware/auth.js';
+import { authenticate, requireModule, requireAction, type AuthRequest } from '../middleware/auth.js';
+import { applySiteScope, enforceCreateScope, getAllowedSiteIds } from '../middleware/siteScoping.js';
 import { emptyToNull, emptyToNullUuid } from '../utils/zodHelpers.js';
 
 const router = Router();
@@ -25,9 +26,8 @@ router.get('/', async (req: AuthRequest, res, next) => {
     if (type) where.type = type;
 
     // Enforce Depot-level sandboxing
-    if (req.userSiteId) {
-      where.siteId = req.userSiteId;
-    } else if (siteId) {
+    applySiteScope(req, where);
+    if (!where.siteId && siteId) {
       where.siteId = siteId;
     }
     if (month) {
@@ -53,7 +53,7 @@ router.get('/', async (req: AuthRequest, res, next) => {
   }
 });
 
-router.post('/', requireModule('pl-register'), async (req: AuthRequest, res, next) => {
+router.post('/', requireModule('pl-register'), requireAction('pl-register', 'create'), enforceCreateScope(), async (req: AuthRequest, res, next) => {
   try {
     const d = txSchema.parse(req.body);
     const t = await prisma.transaction.create({
@@ -63,7 +63,7 @@ router.post('/', requireModule('pl-register'), async (req: AuthRequest, res, nex
         category: d.category,
         description: d.description,
         amount: d.type === 'EXPENSE' ? -Math.abs(d.amount) : Math.abs(d.amount),
-        siteId: d.siteId || null,
+        siteId: d.siteId || req.userSiteId || null,
         reference: d.reference || null,
       },
     });
@@ -76,8 +76,16 @@ router.post('/', requireModule('pl-register'), async (req: AuthRequest, res, nex
   }
 });
 
-router.put('/:id', requireModule('pl-register'), async (req: AuthRequest, res, next) => {
+router.put('/:id', requireModule('pl-register'), requireAction('pl-register', 'edit'), async (req: AuthRequest, res, next) => {
   try {
+    const allowed = getAllowedSiteIds(req);
+    if (allowed.length > 0) {
+      const existing = await prisma.transaction.findUnique({ where: { id: req.params.id as string }, select: { siteId: true } });
+      if (existing?.siteId && !allowed.includes(existing.siteId)) {
+        return res.status(403).json({ error: 'You do not have access to this resource' });
+      }
+    }
+
     const d = txSchema.partial().parse(req.body);
     const t = await prisma.transaction.update({
       where: { id: req.params.id as string },
@@ -96,8 +104,16 @@ router.put('/:id', requireModule('pl-register'), async (req: AuthRequest, res, n
   }
 });
 
-router.delete('/:id', requireModule('pl-register'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', requireModule('pl-register'), requireAction('pl-register', 'delete'), async (req: AuthRequest, res, next) => {
   try {
+    const allowed = getAllowedSiteIds(req);
+    if (allowed.length > 0) {
+      const existing = await prisma.transaction.findUnique({ where: { id: req.params.id as string }, select: { siteId: true } });
+      if (existing?.siteId && !allowed.includes(existing.siteId)) {
+        return res.status(403).json({ error: 'You do not have access to this resource' });
+      }
+    }
+
     await prisma.transaction.delete({ where: { id: req.params.id as string } });
     await prisma.auditLog.create({
       data: { userId: req.userId, action: 'DELETE', entity: 'Transaction', entityId: req.params.id as string },

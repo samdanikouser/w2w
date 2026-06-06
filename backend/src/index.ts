@@ -4,6 +4,7 @@ dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { rateLimit } from 'express-rate-limit';
 
 import authRoutes from './routes/auth.js';
@@ -25,6 +26,7 @@ import roleRoutes from './routes/roles.js';
 import userRoutes from './routes/users.js';
 import notificationRoutes from './routes/notifications.js';
 import deletionRequestRoutes from './routes/deletionRequests.js';
+import settingsRoutes from './routes/settings.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -32,8 +34,15 @@ const PORT = parseInt(process.env.PORT || '4000', 10);
 
 // ── Security ──
 app.use(helmet());
+
+// CORS: In production, refuse to start without explicit CORS_ORIGIN
+const corsOrigin = process.env.CORS_ORIGIN || (process.env.NODE_ENV === 'production' ? undefined : 'http://localhost:3000');
+if (!corsOrigin) {
+  console.error('❌ CORS_ORIGIN must be set in production. Refusing to start.');
+  process.exit(1);
+}
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: corsOrigin,
   credentials: true,
 }));
 
@@ -46,7 +55,25 @@ app.use(rateLimit({
 }));
 
 // ── Body parsing ──
-app.use(express.json({ limit: '2mb' }));
+app.use(cookieParser());
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
+
+// ── Prototype pollution protection ──
+function sanitizeObject(obj: any): void {
+  if (!obj || typeof obj !== 'object') return;
+  for (const key of Object.keys(obj)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      delete obj[key];
+    } else if (typeof obj[key] === 'object') {
+      sanitizeObject(obj[key]);
+    }
+  }
+}
+app.use((req, _res, next) => {
+  if (req.body) sanitizeObject(req.body);
+  next();
+});
 
 // ── Health check ──
 app.get('/api/health', (_req, res) => {
@@ -77,6 +104,7 @@ app.use('/api/roles', roleRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/deletion-requests', deletionRequestRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // ── Error handler ──
 app.use(errorHandler);

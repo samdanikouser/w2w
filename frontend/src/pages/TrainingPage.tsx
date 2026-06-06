@@ -1,8 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { trainingApi, employeesApi, type TrainingRecordPayload } from '../api/endpoints';
+import { useSettingsStore } from '../stores/settingsStore';
 import { X, Edit2, Trash2 } from 'lucide-react';
 import { StatCard, RowBtn } from './SitesPage';
+import { usePermissions } from '../hooks/usePermissions';
 
 function ActionIcon({ children, title, onClick, tone }: any) {
   const c = tone === 'red' ? 'var(--color-red)' : 'var(--color-w2w)';
@@ -34,6 +36,7 @@ type Tab = 'records' | 'modules' | 'matrix';
 
 export default function TrainingPage() {
   const qc = useQueryClient();
+  const { canCreate, canEdit, canDelete } = usePermissions();
   const [tab, setTab] = useState<Tab>('records');
   const [assignModal, setAssignModal] = useState(false);
   const [assignAllModal, setAssignAllModal] = useState(false);
@@ -53,6 +56,23 @@ export default function TrainingPage() {
     return m ? (m.type || '').toUpperCase() === 'MANDATORY' : false;
   };
 
+  // Auto-sync settings training modules → backend DB on mount
+  const hasSynced = useRef(false);
+  useEffect(() => {
+    if (hasSynced.current) return;
+    hasSynced.current = true;
+    const settings = useSettingsStore.getState().settings;
+    if (settings.trainingModules?.length > 0) {
+      const payload = settings.trainingModules.map(m => ({
+        settingsId: m.id,
+        name: m.name,
+        type: m.type.toUpperCase(),
+      }));
+      trainingApi.syncModules(payload)
+        .then(() => qc.invalidateQueries({ queryKey: ['training', 'modules'] }))
+        .catch(() => {/* silent */});
+    }
+  }, [qc]);
 
   /* ── Data ── */
   const { data: modules = [] } = useQuery({ queryKey: ['training', 'modules'], queryFn: () => trainingApi.listModules() });
@@ -237,10 +257,10 @@ export default function TrainingPage() {
           <div className="pt">Training Tracker</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          {tab === 'modules' && <button className="btn btn-primary" onClick={() => { setModForm({ id: '', name: '', description: '', type: 'MANDATORY', durationHrs: 0 }); setModModal(true); }}>+ New Module</button>}
+          {tab === 'modules' && canCreate('training') && <button className="btn btn-primary" onClick={() => { setModForm({ id: '', name: '', description: '', type: 'MANDATORY', durationHrs: 0 }); setModModal(true); }}>+ New Module</button>}
 
-          <button className="btn btn-accent" onClick={openAssign}>+ Assign Training</button>
-          <button className="btn btn-ghost" onClick={openAssignAll}>📋 Assign to All</button>
+          {canCreate('training') && <button className="btn btn-accent" onClick={openAssign}>+ Assign Training</button>}
+          {canCreate('training') && <button className="btn btn-ghost" onClick={openAssignAll}>📋 Assign to All</button>}
         </div>
       </div>
 
@@ -377,8 +397,8 @@ export default function TrainingPage() {
                     </div>
                     <span className="badge br" style={{ fontSize: 9 }}>Mandatory</span>
                     
-<ActionIcon title="Edit" tone="blue" onClick={() => { setModForm({ id: mod.id, name: mod.name, description: mod.description || '', type: mod.type || 'MANDATORY', durationHrs: mod.durationHrs || 0 }); setModModal(true); }}><Edit2 size={13}/></ActionIcon>
-<ActionIcon title="Delete" tone="red" onClick={() => deleteModMut.mutate(mod.id)}><Trash2 size={13}/></ActionIcon>
+{canEdit('training') && <ActionIcon title="Edit" tone="blue" onClick={() => { setModForm({ id: mod.id, name: mod.name, description: mod.description || '', type: mod.type || 'MANDATORY', durationHrs: mod.durationHrs || 0 }); setModModal(true); }}><Edit2 size={13}/></ActionIcon>}
+{canDelete('training') && <ActionIcon title="Delete" tone="red" onClick={() => deleteModMut.mutate(mod.id)}><Trash2 size={13}/></ActionIcon>}
 <button className="btn btn-ghost" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => assignAllForModule(mod.id)}>Assign All</button>
                   </div>
                 );
@@ -489,7 +509,12 @@ export default function TrainingPage() {
                   </select>
                 </div>
                 <div className="fg"><label className="fl">Training Module <span className="req">*</span></label>
-                  <select className="fc" value={assignForm.moduleName} onChange={(e) => setAssignForm({ ...assignForm, moduleName: e.target.value })}>
+                  <select className="fc" value={assignForm.moduleName} onChange={(e) => {
+                    const selectedId = e.target.value;
+                    const mod = (modules as any[]).find((m: any) => m.id === selectedId);
+                    const type = mod ? ((mod.type || '').toUpperCase() === 'MANDATORY' ? 'Mandatory' : 'Optional') : assignForm.type;
+                    setAssignForm({ ...assignForm, moduleName: selectedId, type });
+                  }}>
                     <option value="">— Select —</option>
                     <optgroup label="Mandatory">
                       {modules.filter((m:any) => (m.type || '').toUpperCase() === 'MANDATORY').map((m:any) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -500,10 +525,7 @@ export default function TrainingPage() {
                   </select>
                 </div>
                 <div className="fg"><label className="fl">Type</label>
-                  <select className="fc" value={assignForm.type} onChange={(e) => setAssignForm({ ...assignForm, type: e.target.value })}>
-                    <option>Mandatory</option>
-                    <option>Optional</option>
-                  </select>
+                  <input className="fc" value={assignForm.type} readOnly style={{ background: 'var(--color-surface2)', cursor: 'not-allowed' }} />
                 </div>
                 <div className="fg"><label className="fl">Assigned Date</label>
                   <input className="fc" type="date" value={assignForm.assignedDate} onChange={(e) => setAssignForm({ ...assignForm, assignedDate: e.target.value })} />

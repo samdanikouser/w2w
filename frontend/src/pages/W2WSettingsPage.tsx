@@ -6,7 +6,7 @@ import {
   Building, Users as UsersIcon, KeyRound, Database, Search, Shield, Layers, AlertTriangle, Clock, FileText, Download, MapPin, Truck, Warehouse,
 } from 'lucide-react';
 import { UsersTab, RolesTab } from './SettingsPage';
-import { auditLogsApi, rolesApi, deletionRequestsApi, wasteTypesApi } from '../api/endpoints';
+import { auditLogsApi, rolesApi, deletionRequestsApi, wasteTypesApi, trainingApi } from '../api/endpoints';
 import { exportCsv } from '../utils/csv';
 import { loadGeography, saveGeography } from '../utils/geography';
 import {
@@ -21,9 +21,9 @@ import {
   type TrainingModule,
   type PaymentScale,
   type CostCenter,
-  loadSettings,
-  saveSettings
+  type CostCenter,
 } from '../utils/programmeSettings';
+import { useSettingsStore } from '../stores/settingsStore';
 
 // ── Grouped navigation ──
 interface NavItem { id: string; label: string; icon: React.ReactNode; keywords: string; description: string }
@@ -47,6 +47,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'training-modules', label: 'Training Modules', icon: <BookOpen size={14} />, keywords: 'training module mandatory optional safety', description: 'Manage mandatory & optional training modules for employees' },
       { id: 'payment-scale', label: 'Payment Scale', icon: <DollarSign size={14} />, keywords: 'payment salary scale basic allowance ctc', description: 'Set basic pay and allowances for each worker role' },
       { id: 'cost-centers', label: 'Cost Centers', icon: <Landmark size={14} />, keywords: 'cost center budget operational administrative', description: 'Define budget cost centres for P&L and expense tracking' },
+      { id: 'pro-partners', label: 'PRO Partners', icon: <Building size={14} />, keywords: 'pro partner petco polyco fibre cycle cooperative', description: 'Manage Producer Responsibility Organisation partners for cooperatives' },
       { id: 'pl-config', label: 'P&L Configuration', icon: <DollarSign size={14} />, keywords: 'pl profit loss type category cost centre', description: 'Configure P&L entry types, categories, and cost centres' },
       { id: 'vehicle-types', label: 'Vehicle Types', icon: <Truck size={14} />, keywords: 'vehicle type fleet bakkie truck trolley', description: 'Manage vehicle type options for the fleet register' },
       { id: 'employee-fields', label: 'Employee Fields', icon: <UsersIcon size={14} />, keywords: 'employee department designation role bank', description: 'Manage dynamic dropdown lists for employee creation' },
@@ -68,35 +69,45 @@ const NAV_GROUPS: NavGroup[] = [
 export default function W2WSettingsPage() {
   const { user } = useAuthStore();
   const [tab, setTab] = useState('organisation');
-  const [settings, setSettings] = useState<ProgrammeSettings>(loadSettings);
   const [toast, setToast] = useState<{ message: string; tone: 'green' | 'amber' | 'red' } | null>(null);
 
+  const settings = useSettingsStore(s => s.settings);
+  const updateSettings = useSettingsStore(s => s.updateSettings);
+  const org = useSettingsStore(s => s.org);
+  const updateOrg = useSettingsStore(s => s.updateOrg);
+
   const update = (partial: Partial<ProgrammeSettings>) => {
-    const next = { ...settings, ...partial };
-    setSettings(next);
-    saveSettings(next);
+    updateSettings(partial);
   };
+
+  // Sync training modules from settings → backend DB
+  const syncTrainingModules = (modules: TrainingModule[]) => {
+    const payload = modules.map(m => ({
+      settingsId: m.id,
+      name: m.name,
+      type: m.type.toUpperCase(),
+    }));
+    trainingApi.syncModules(payload).catch(() => {/* silent — best effort */});
+  };
+
+  // Sync on mount so the DB is always seeded from settings
+  useEffect(() => {
+    syncTrainingModules(settings.trainingModules);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showToast = (message: string, tone: 'green' | 'amber' | 'red' = 'green') => {
     setToast({ message, tone });
     setTimeout(() => setToast(null), 3500);
   };
 
-  // Organisation state (from old SettingsPage)
-  const [org, setOrg] = useState<Record<string, string>>(() => {
+  const setOrgField = (k: string, v: string) => updateOrg({ [k]: v });
+  
+  const saveOrg = async () => {
     try {
-      const saved = JSON.parse(localStorage.getItem('w2w_org') || '{}');
-      if (!saved.orgName && user?.siteName) saved.orgName = user.siteName;
-      return saved;
-    } catch { return { orgName: user?.siteName || '' }; }
-  });
-  const setOrgField = (k: string, v: string) => setOrg((p) => ({ ...p, [k]: v }));
-  const saveOrg = () => {
-    try {
-      localStorage.setItem('w2w_org', JSON.stringify(org));
+      await updateOrg(org);
       setToast({ message: 'Organisation settings saved.', tone: 'green' });
     } catch {
-      setToast({ message: 'Could not save (localStorage unavailable).', tone: 'amber' });
+      setToast({ message: 'Could not save organisation settings to server.', tone: 'amber' });
     }
   };
 
@@ -323,16 +334,17 @@ export default function W2WSettingsPage() {
           {tab === 'geography' && <GeographySettingsTab onToast={showToast} />}
 
           {tab === 'waste-cats' && <WasteCategoriesTab onToast={showToast} />}
-          {tab === 'training-modules' && <TrainingModulesTab data={settings.trainingModules} onUpdate={(d) => { update({ trainingModules: d }); showToast('Training modules updated.'); }} />}
+          {tab === 'training-modules' && <TrainingModulesTab data={settings.trainingModules} onUpdate={(d) => { update({ trainingModules: d }); syncTrainingModules(d); showToast('Training modules updated & synced.'); }} />}
           {tab === 'payment-scale' && <PaymentScaleTab data={settings.paymentScales} onUpdate={(d) => { update({ paymentScales: d }); showToast('Payment scale updated.'); }} />}
           {tab === 'cost-centers' && <CostCentersTab data={settings.costCenters} onUpdate={(d) => { update({ costCenters: d }); showToast('Cost centers updated.'); }} />}
+          {tab === 'pro-partners' && <ProPartnersTab data={settings.proPartners || []} onUpdate={(d) => { update({ proPartners: d }); showToast('PRO Partners updated.'); }} />}
           {tab === 'employee-fields' && <EmployeeFieldsTab settings={settings} onUpdate={update} onToast={showToast} />}
           {tab === 'pl-config' && <PLConfigTab onToast={showToast} />}
           {tab === 'vehicle-types' && <VehicleTypesTab onToast={showToast} />}
           {tab === 'depot-types' && <DepotTypesTab onToast={showToast} />}
           {tab === 'system' && <SystemTab settings={settings} siteName={user?.siteName} org={org} />}
 
-          {tab === 'data' && <DataPopiaTab exportAudit={exportAudit} onToast={showToast} retentionEmployees={org.retentionEmployees || '7'} retentionWaste={org.retentionWaste || '10'} onRetentionChange={(key, val) => { setOrgField(key, val); saveOrg(); }} />}
+          {tab === 'data' && <DataPopiaTab exportAudit={exportAudit} onToast={showToast} retentionEmployees={org.retentionEmployees || '7'} retentionWaste={org.retentionWaste || '10'} onRetentionChange={(key, val) => { setOrgField(key, val); }} />}
         </div>
       </div>
     </div>
@@ -1046,16 +1058,16 @@ function ItemModal({ title, onClose, onSave, children }: { title: string; onClos
 // ═══════════════════════════════════════════════════
 function GeographySettingsTab({ onToast }: { onToast: (msg: string) => void }) {
   const [geo, setGeo] = useState(loadGeography);
-  const [modal, setModal] = useState<{ type: 'province' | 'municipality' | 'subRegion' | 'proPartner'; mode: 'add' | 'edit'; item?: any } | null>(null);
+  const [modal, setModal] = useState<{ type: 'province' | 'municipality' | 'subRegion'; mode: 'add' | 'edit'; item?: any } | null>(null);
   const [form, setForm] = useState<any>({});
 
   const persist = (updated: any) => { setGeo(updated); saveGeography(updated); };
 
-  const openAdd = (type: 'province' | 'municipality' | 'subRegion' | 'proPartner') => { setForm({}); setModal({ type, mode: 'add' }); };
-  const openEdit = (type: 'province' | 'municipality' | 'subRegion' | 'proPartner', item: any) => { setForm({ ...item }); setModal({ type, mode: 'edit', item }); };
+  const openAdd = (type: 'province' | 'municipality' | 'subRegion') => { setForm({}); setModal({ type, mode: 'add' }); };
+  const openEdit = (type: 'province' | 'municipality' | 'subRegion', item: any) => { setForm({ ...item }); setModal({ type, mode: 'edit', item }); };
 
-  const remove = (type: 'province' | 'municipality' | 'subRegion' | 'proPartner', id: string) => {
-    const key = type === 'province' ? 'provinces' : type === 'municipality' ? 'municipalities' : type === 'subRegion' ? 'subRegions' : 'proPartners';
+  const remove = (type: 'province' | 'municipality' | 'subRegion', id: string) => {
+    const key = type === 'province' ? 'provinces' : type === 'municipality' ? 'municipalities' : 'subRegions';
     if (!confirm('Delete this entry?')) return;
     persist({ ...geo, [key]: geo[key].filter((x: any) => x.id !== id) });
     onToast('Deleted.');
@@ -1064,19 +1076,19 @@ function GeographySettingsTab({ onToast }: { onToast: (msg: string) => void }) {
   const handleSave = () => {
     if (!modal) return;
     const { type, mode, item } = modal;
-    const key = type === 'province' ? 'provinces' : type === 'municipality' ? 'municipalities' : type === 'subRegion' ? 'subRegions' : 'proPartners';
+    const key = type === 'province' ? 'provinces' : type === 'municipality' ? 'municipalities' : 'subRegions';
     if (!form.name?.trim()) { alert('Name is required'); return; }
     if (mode === 'edit' && item) {
       persist({ ...geo, [key]: (geo[key] || []).map((x: any) => x.id === item.id ? { ...x, ...form } : x) });
     } else {
-      const prefix = type === 'province' ? 'PROV' : type === 'municipality' ? 'MUN' : type === 'subRegion' ? 'SR' : 'PRO';
+      const prefix = type === 'province' ? 'PROV' : type === 'municipality' ? 'MUN' : 'SR';
       persist({ ...geo, [key]: [...(geo[key] || []), { ...form, id: prefix + '-' + Date.now().toString(36).toUpperCase() }] });
     }
     setModal(null);
     onToast(mode === 'edit' ? 'Updated.' : 'Added.');
   };
 
-  const typeLabel = (t: string) => t === 'province' ? 'Province' : t === 'municipality' ? 'Municipality' : t === 'subRegion' ? 'Sub-Region' : 'PRO Partner';
+  const typeLabel = (t: string) => t === 'province' ? 'Province' : t === 'municipality' ? 'Municipality' : 'Sub-Region';
 
   const sectionHead: React.CSSProperties = {
     fontSize: 10, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase',
@@ -1092,12 +1104,11 @@ function GeographySettingsTab({ onToast }: { onToast: (msg: string) => void }) {
   return (
     <>
       {/* ── Summary Stats ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 20 }}>
         {[
           { label: 'Provinces', value: geo.provinces.length, icon: '🇿🇦', color: 'var(--color-w2w)' },
           { label: 'Municipalities', value: geo.municipalities.length, icon: '🏛', color: 'var(--color-green)' },
           { label: 'Sub-Regions', value: geo.subRegions.length, icon: '📍', color: 'var(--color-amber)' },
-          { label: 'PRO Partners', value: (geo.proPartners || []).length, icon: '🤝', color: 'var(--color-purple)' },
         ].map((s) => (
           <div key={s.label} className="card" style={{ padding: '12px 14px', borderLeft: `3px solid ${s.color}` }}>
             <div style={{ fontSize: 9, color: 'var(--color-text3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.icon} {s.label}</div>
@@ -1107,7 +1118,7 @@ function GeographySettingsTab({ onToast }: { onToast: (msg: string) => void }) {
       </div>
 
       <div className="alert alert-blue" style={{ marginBottom: 18 }}>
-        <span>Geography settings define the <b>provinces</b>, <b>municipalities</b>, and <b>sub-regions</b> available across the platform. These appear in site forms, employee records, and reports. <b>PRO Partners</b> are Producer Responsibility Organisations linked to your EPR compliance.</span>
+        <span>Geography settings define the <b>provinces</b>, <b>municipalities</b>, and <b>sub-regions</b> available across the platform. These appear in site forms, employee records, and reports.</span>
       </div>
 
       {/* Provinces */}
@@ -1208,38 +1219,7 @@ function GeographySettingsTab({ onToast }: { onToast: (msg: string) => void }) {
         </div>
       </div>
 
-      {/* PRO Partners */}
-      <div className="card" style={{ marginBottom: 18, overflow: 'hidden' }}>
-        <div style={{ padding: '12px 16px', background: 'var(--color-surface2)', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text)' }}>🤝 PRO Partners</div>
-            <div style={{ fontSize: 10, color: 'var(--color-text3)', marginTop: 2 }}>Producer Responsibility Organisations for EPR compliance</div>
-          </div>
-          <button className="btn btn-accent btn-sm" onClick={() => openAdd('proPartner')}><Plus size={11} /> Add PRO Partner</button>
-        </div>
-        <div className="tw">
-          <table>
-            <thead><tr><th>Name</th><th>Code</th><th>Focus</th><th>Contact</th><th style={{ width: 90 }}>Actions</th></tr></thead>
-            <tbody>
-              {(geo.proPartners || []).map((p: any) => (
-                <tr key={p.id}>
-                  <td style={{ fontWeight: 600 }}>{p.name}</td>
-                  <td><span className="badge bb">{p.code}</span></td>
-                  <td style={{ fontSize: 11 }}>{p.focus || '—'}</td>
-                  <td style={{ fontSize: 11 }}>{p.contact || '—'}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <button style={actionBtn} title="Edit" onClick={() => openEdit('proPartner', p)}><Edit3 size={13} /></button>
-                      <button style={dangerBtn} title="Delete" onClick={() => remove('proPartner', p.id)}><Trash2 size={13} /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {(geo.proPartners || []).length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-text3)', padding: 20 }}>No PRO partners added yet</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </div>
+
 
       {/* Add/Edit Modal */}
       {modal && (
@@ -1297,16 +1277,7 @@ function GeographySettingsTab({ onToast }: { onToast: (msg: string) => void }) {
                   </>
                 )}
 
-                {modal.type === 'proPartner' && (
-                  <>
-                    <div className="fg"><label className="fl">Focus</label>
-                      <input className="fc" value={form.focus || ''} onChange={(e) => setForm({ ...form, focus: e.target.value })} placeholder="e.g. PET Plastics, Paper & Cardboard" />
-                    </div>
-                    <div className="fg"><label className="fl">Contact</label>
-                      <input className="fc" value={form.contact || ''} onChange={(e) => setForm({ ...form, contact: e.target.value })} placeholder="Contact person or email" />
-                    </div>
-                  </>
-                )}
+
               </div>
             </div>
             <div className="mf">
@@ -1822,6 +1793,62 @@ function DepotTypesTab({ onToast }: { onToast: (msg: string, tone?: 'green' | 'a
         </ItemModal>
       )}
     </>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+//  🤝 PRO Partners Tab
+// ═══════════════════════════════════════════════════
+function ProPartnersTab({ data, onUpdate }: { data: string[]; onUpdate: (d: string[]) => void }) {
+  const [partners, setPartners] = useState([...data]);
+  const [newPartner, setNewPartner] = useState('');
+
+  const add = () => {
+    if (!newPartner.trim()) return;
+    if (partners.includes(newPartner.trim())) return;
+    const updated = [...partners, newPartner.trim()];
+    setPartners(updated);
+    onUpdate(updated);
+    setNewPartner('');
+  };
+
+  const remove = (i: number) => {
+    const updated = partners.filter((_, idx) => idx !== i);
+    setPartners(updated);
+    onUpdate(updated);
+  };
+
+  return (
+    <div className="card">
+      <div className="ch">
+        <div className="ct">PRO Partners</div>
+        <div className="cs">Producer Responsibility Organisation partners available in the Cooperative form</div>
+      </div>
+      <div className="cb">
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <input className="fc" value={newPartner} onChange={(e) => setNewPartner(e.target.value)}
+            placeholder="Add PRO partner name..." onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+          <button className="btn btn-primary" onClick={add}><Plus size={14} /></button>
+        </div>
+        {partners.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text3)', fontSize: 12, fontStyle: 'italic' }}>
+            No PRO partners configured. Add one above.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {partners.map((p, i) => (
+              <div key={i} className="badge bg" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', fontSize: 12 }}>
+                {p}
+                <X size={12} style={{ cursor: 'pointer', opacity: 0.7 }} onClick={() => remove(i)} />
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ marginTop: 16, fontSize: 11, color: 'var(--color-text3)' }}>
+          {partners.length} partner{partners.length !== 1 ? 's' : ''} configured · Used in the Add Cooperative form
+        </div>
+      </div>
+    </div>
   );
 }
 

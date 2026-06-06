@@ -12,6 +12,8 @@ import {
   Plus, Search, X, Check, XCircle, Trash2, Download, Edit2,
 } from 'lucide-react';
 import { exportCsv } from '../utils/csv';
+import { useSettingsStore } from '../stores/settingsStore';
+import { usePermissions } from '../hooks/usePermissions';
 
 const STATUS_STYLES: Record<string, string> = {
   PENDING: 'badge ba',
@@ -30,6 +32,8 @@ const fmtKg = (kg: number) =>
 
 export default function WasteLogsPage() {
   const queryClient = useQueryClient();
+  const settings = useSettingsStore((s) => s.settings);
+  const { canCreate, canEdit, canDelete } = usePermissions();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [siteFilter, setSiteFilter] = useState('all');
@@ -44,6 +48,7 @@ export default function WasteLogsPage() {
   });
   const [wasteInputs, setWasteInputs] = useState<Record<string, number>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingIds, setEditingIds] = useState<string[]>([]);
 
   function genDN() {
     return 'DN-' + String(Math.floor(Math.random() * 90000) + 10000);
@@ -80,7 +85,20 @@ export default function WasteLogsPage() {
 
   const logs: any[] = data?.data || [];
   const summary = data?.summary || { totalEntries: 0, totalQuantity: 0, totalValue: 0 };
-  const wasteTypeList = Array.isArray(wasteTypes) ? (wasteTypes as any[]) : (wasteTypes as any).data || [];
+  const dbWasteTypes = Array.isArray(wasteTypes) ? (wasteTypes as any[]) : (wasteTypes as any).data || [];
+  const wasteTypeList = useMemo(() => {
+    if (dbWasteTypes.length > 0) return dbWasteTypes;
+
+    return settings.wasteCategories.map((cat) => ({
+      id: cat.id,
+      name: cat.name,
+      code: cat.code,
+      colour: cat.color,
+      unit: 'kg',
+      pricePerUnit: cat.pricePerKg,
+      pricePerKg: cat.pricePerKg,
+    }));
+  }, [dbWasteTypes, settings.wasteCategories]);
   const sites: any[] = Array.isArray(sitesData) ? (sitesData as any[]) : (sitesData as any).data || [];
   const depots: any[] = Array.isArray(depotsData) ? (depotsData as any[]) : (depotsData as any).data || [];
   const employees: any[] = empData?.data || [];
@@ -96,17 +114,25 @@ export default function WasteLogsPage() {
   const perCategory = useMemo(() => {
     const map = new Map<string, { id: string; name: string; colour: string; kg: number; rev: number; count: number }>();
     filtered.forEach((l: any) => {
-      const id = l.wasteType?.id || l.wasteTypeId || l.wasteTypeName || 'unknown';
-      const name = l.wasteType?.name || l.wasteTypeName || 'Unknown';
-      const colour = l.wasteType?.colour || '#7a98ab';
-      const row = map.get(id) || { id, name, colour, kg: 0, rev: 0, count: 0 };
+      // Resolve category name first
+      let name = l.wasteType?.name || l.wasteTypeName;
+      if (!name && l.notes) {
+        const catMatch = l.notes.match(/Category:\s*([^|]+)/);
+        if (catMatch) name = catMatch[1].trim();
+      }
+      name = name || 'Unknown';
+      // Use name as the grouping key so settings-based categories group correctly
+      const key = l.wasteType?.id || name;
+      const matchedCat = name !== 'Unknown' ? wasteTypeList.find((c: any) => c.name === name) : null;
+      const colour = l.wasteType?.colour || matchedCat?.colour || '#7a98ab';
+      const row = map.get(key) || { id: key, name, colour, kg: 0, rev: 0, count: 0 };
       row.kg += Number(l.quantity) || 0;
       row.rev += Number(l.totalValue) || 0;
       row.count += 1;
-      map.set(id, row);
+      map.set(key, row);
     });
     return Array.from(map.values()).sort((a, b) => b.kg - a.kg);
-  }, [filtered]);
+  }, [filtered, wasteTypeList]);
   const maxCatKg = perCategory[0]?.kg || 1;
 
   // ── KPIs (4 cards) ──
@@ -121,16 +147,35 @@ export default function WasteLogsPage() {
   const rejectMut = useMutation({ mutationFn: (id: string) => wasteLogsApi.reject(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['waste-logs'] }), onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.') });
   const deleteMut = useMutation({ mutationFn: (id: string) => wasteLogsApi.delete(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['waste-logs'] }), onError: (err: any) => alert(err?.response?.data?.error || err.message || 'Something went wrong.') });
 
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingIds([]);
+    setForm({ date: new Date().toISOString().split('T')[0], siteId: '', depotId: '', collectorId: '', notes: '' });
+    setWasteInputs({});
+  };
+
   const handleSave = async () => {
     setIsSubmitting(true);
     try {
-      const dnRef = genDN();
+      const dnRef = editingIds.length > 0 ? ((() => {
+        // Preserve existing DN ref when editing
+        const existing = logs.find((l: any) => editingIds.includes(l.id));
+        const match = existing?.notes?.match(/Ref:\s*(DN-\d+)/);
+        return match ? match[1] : genDN();
+      })()) : genDN();
+
       const activeCats = wasteTypeList.filter((c: any) => wasteInputs[c.id] > 0);
       
       if (activeCats.length === 0) {
         alert("Please enter at least one waste quantity.");
         setIsSubmitting(false);
         return;
+      }
+      const isUuidId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+      // If editing, delete old entries first
+      if (editingIds.length > 0) {
+        await Promise.all(editingIds.map((id) => wasteLogsApi.delete(id)));
       }
 
       const promises = activeCats.map((c: any) => {
@@ -143,6 +188,7 @@ export default function WasteLogsPage() {
 
         const noteStr = [
           `Ref: ${dnRef}`,
+          `Category: ${c.name}`,
           depotName ? `Depot: ${depotName}` : '',
           form.notes ? `Notes: ${form.notes}` : '',
         ].filter(Boolean).join(' | ');
@@ -153,7 +199,7 @@ export default function WasteLogsPage() {
           quantity: qty,
           unit: c.unit || 'kg',
           pricePerUnit: c.pricePerKg || c.pricePerUnit || 0,
-          wasteTypeId: c.id || null,
+          wasteTypeId: isUuidId(c.id) ? c.id : null,
           collectorId: form.collectorId || null,
           notes: noteStr,
         });
@@ -162,9 +208,7 @@ export default function WasteLogsPage() {
       await Promise.all(promises);
       
       queryClient.invalidateQueries({ queryKey: ['waste-logs'] });
-      setShowModal(false);
-      setForm({ date: new Date().toISOString().split('T')[0], siteId: '', depotId: '', collectorId: '', notes: '' });
-      setWasteInputs({});
+      closeModal();
     } catch (err: any) {
       console.error(err);
       const msg = err?.response?.data?.error || err.message || 'Failed to save waste collection.';
@@ -200,9 +244,6 @@ export default function WasteLogsPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setShowModal(true)} className="btn btn-primary">
-            <Plus size={13} /> Record Waste
-          </button>
           <button className="btn btn-ghost" onClick={() => exportCsv('waste-logs', filtered, [
             { key: 'date', label: 'Date', map: (r: any) => r.date ? new Date(r.date).toISOString().slice(0, 10) : '' },
             { key: 'siteName', label: 'Site', map: (r: any) => r.site?.name || r.siteName || '' },
@@ -220,6 +261,68 @@ export default function WasteLogsPage() {
         </div>
       </div>
 
+      {/* ══ Global Filter Bar ══ */}
+      <div className="card mb14" style={{ padding: '12px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-w2w)', textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 4 }}>Filters</div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 10px',
+              borderRadius: 7,
+              background: 'var(--color-surface3)',
+              border: '1px solid var(--color-border)',
+              width: 200,
+            }}
+          >
+            <Search size={12} style={{ color: 'var(--color-text3)', flexShrink: 0 }} />
+            <input
+              type="text"
+              placeholder="Search..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                boxShadow: 'none',
+                padding: 0,
+                fontSize: 12,
+                fontFamily: 'var(--font-sans)',
+                color: 'var(--color-text)',
+                flex: 1,
+              }}
+            />
+          </div>
+          <select className="fc" style={{ width: 140 }} value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}>
+            <option value="all">All Sites</option>
+            {sites.map((s: any) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+          <input
+            type="month"
+            className="fc"
+            style={{ width: 150 }}
+            value={monthFilter}
+            onChange={(e) => setMonthFilter(e.target.value)}
+          />
+          <select className="fc" style={{ width: 130 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="all">All Status</option>
+            <option value="PENDING">Pending</option>
+            <option value="APPROVED">Approved</option>
+            <option value="REJECTED">Rejected</option>
+          </select>
+          {(search || siteFilter !== 'all' || monthFilter || statusFilter !== 'all') && (
+            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => { setSearch(''); setSiteFilter('all'); setMonthFilter(''); setStatusFilter('all'); }}>
+              <X size={12} /> Clear
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* ══ 4 Summary Cards with rails ══ */}
       <div className="stats-grid">
         <div className="stat-card sc-blue">
@@ -227,8 +330,8 @@ export default function WasteLogsPage() {
             <div className="stat-label">Total Recovered</div>
             <span style={{ fontSize: 18 }}>♻</span>
           </div>
-          <div className="stat-val" style={{ color: 'var(--color-w2w)' }}>{fmtKg(totalKg)}</div>
-          <div className="stat-sub">{fmtKg(summary.totalQuantity || 0)} all-time</div>
+          <div className="stat-val" style={{ color: 'var(--color-w2w)' }}>{(totalKg / 1000).toFixed(2)}t</div>
+          <div className="stat-sub">{((summary.totalQuantity || 0) / 1000).toFixed(2)}t all-time</div>
         </div>
         <div className="stat-card sc-green">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
@@ -294,64 +397,12 @@ export default function WasteLogsPage() {
         </div>
       </div>
 
-      {/* ══ Table card with filters in card header (prototype style) ══ */}
+      {/* ══ Table card ══ */}
       <div className="card">
         <div className="ch">
           <div>
             <div className="ct">Collection Records</div>
             <div className="cs">Showing {filtered.length} of {data?.total || 0} entries</div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '4px 10px',
-                borderRadius: 7,
-                background: 'var(--color-surface3)',
-                border: '1px solid var(--color-border)',
-                width: 200,
-              }}
-            >
-              <Search size={12} style={{ color: 'var(--color-text3)', flexShrink: 0 }} />
-              <input
-                type="text"
-                placeholder="Search..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  boxShadow: 'none',
-                  padding: 0,
-                  fontSize: 12,
-                  fontFamily: 'var(--font-sans)',
-                  color: 'var(--color-text)',
-                  flex: 1,
-                }}
-              />
-            </div>
-            <select className="fc" style={{ width: 140 }} value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}>
-              <option value="all">All Sites</option>
-              {sites.map((s: any) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-            <input
-              type="month"
-              className="fc"
-              style={{ width: 150 }}
-              value={monthFilter}
-              onChange={(e) => setMonthFilter(e.target.value)}
-            />
-            <select className="fc" style={{ width: 130 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="all">All Status</option>
-              <option value="PENDING">Pending</option>
-              <option value="APPROVED">Approved</option>
-              <option value="REJECTED">Rejected</option>
-            </select>
           </div>
         </div>
         <div className="tw">
@@ -361,94 +412,139 @@ export default function WasteLogsPage() {
                 <th>Date</th>
                 <th>Site</th>
                 <th>Collector</th>
-                <th>Waste Type</th>
-                <th>Qty</th>
-                <th>Unit Price</th>
-                <th>Total</th>
+                <th>Waste Categories</th>
+                <th>Total Qty</th>
+                <th>Total Value</th>
                 <th>Status</th>
                 <th style={{ width: 130 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>Loading...</td></tr>
+                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>Loading...</td></tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--color-text3)' }}>
                     {logs.length === 0 ? 'No waste logs yet. Click "Record Waste" to log a collection.' : 'No logs match your filters.'}
                   </td>
                 </tr>
-              ) : (
-                filtered.map((log: any) => {
-                  const coll = log.collector;
-                  const collName = coll ? `${coll.firstName || ''} ${coll.lastName || ''}`.trim() : (log.collectorName || '');
+              ) : (() => {
+                // Group by DN ref from notes
+                const grouped = new Map<string, any[]>();
+                filtered.forEach((log: any) => {
+                  const dnMatch = log.notes?.match(/Ref:\s*(DN-\d+)/);
+                  const key = dnMatch ? dnMatch[1] : `SINGLE-${log.id}`;
+                  if (!grouped.has(key)) grouped.set(key, []);
+                  grouped.get(key)!.push(log);
+                });
+
+                return Array.from(grouped.entries()).map(([dnRef, groupLogs]) => {
+                  const first = groupLogs[0];
+                  const coll = first.collector;
+                  const collName = coll ? `${coll.firstName || ''} ${coll.lastName || ''}`.trim() : '';
+                  const totalQty = groupLogs.reduce((s: number, l: any) => s + (Number(l.quantity) || 0), 0);
+                  const totalVal = groupLogs.reduce((s: number, l: any) => s + (Number(l.totalValue) || 0), 0);
+                  const allPending = groupLogs.every((l: any) => l.status === 'PENDING');
+                  const statusLabel = groupLogs.every((l: any) => l.status === groupLogs[0].status)
+                    ? (STATUS_LABELS[groupLogs[0].status] || groupLogs[0].status)
+                    : 'Mixed';
+                  const statusClass = groupLogs.every((l: any) => l.status === groupLogs[0].status)
+                    ? (STATUS_STYLES[groupLogs[0].status] || 'badge bk')
+                    : 'badge ba';
+
                   return (
-                    <tr key={log.id}>
-                      <td>{log.date ? new Date(log.date).toLocaleDateString() : '—'}</td>
-                      <td>{log.site?.name || log.siteName || '—'}</td>
+                    <tr key={dnRef}>
+                      <td>
+                        <div>{first.date ? new Date(first.date).toLocaleDateString() : '—'}</div>
+                        {dnRef.startsWith('DN-') && (
+                          <div style={{ fontSize: 10, color: 'var(--color-text3)', fontFamily: 'var(--font-mono)' }}>{dnRef}</div>
+                        )}
+                      </td>
+                      <td>{first.site?.name || first.siteName || '—'}</td>
                       <td style={{ fontSize: 11 }}>{collName || '—'}</td>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span
-                            style={{
-                              width: 8,
-                              height: 8,
-                              borderRadius: '50%',
-                              flexShrink: 0,
-                              background: log.wasteType?.colour || '#999',
-                            }}
-                          />
-                          <span style={{ fontWeight: 600 }}>{log.wasteType?.name || log.wasteTypeName || '—'}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          {groupLogs.map((l: any, i: number) => {
+                            const catName = l.wasteType?.name || (() => { const m = l.notes?.match(/Category:\s*([^|]+)/); return m ? m[1].trim() : ''; })();
+                            const matchedCat = catName ? wasteTypeList.find((c: any) => c.name === catName) : null;
+                            const dotColor = l.wasteType?.colour || matchedCat?.colour || '#999';
+                            return (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
+                              <span style={{ width: 7, height: 7, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
+                              <span style={{ fontWeight: 600 }}>{catName || '—'}</span>
+                              <span style={{ color: 'var(--color-text3)' }}>({l.quantity} {l.unit || 'kg'})</span>
+                            </div>
+                            );
+                          })}
                         </div>
                       </td>
-                      <td style={{ fontFamily: 'var(--font-mono)' }}>{log.quantity} {log.unit || 'kg'}</td>
-                      <td>{log.pricePerUnit != null ? `R ${Number(log.pricePerUnit).toFixed(2)}` : '—'}</td>
-                      <td style={{ fontWeight: 700, color: 'var(--color-green)' }}>
-                        {log.totalValue != null ? `R ${Number(log.totalValue).toFixed(2)}` : '—'}
-                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtKg(totalQty)}</td>
+                      <td style={{ fontWeight: 700, color: 'var(--color-green)' }}>{fmtZAR(totalVal)}</td>
                       <td>
-                        <span className={STATUS_STYLES[log.status] || 'badge bk'}>
-                          {STATUS_LABELS[log.status] || log.status}
-                        </span>
+                        <span className={statusClass}>{statusLabel}</span>
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 4 }}>
-                          {log.status === 'PENDING' && (
+                          {allPending && canEdit('waste-logs') && (
                             <>
-                              <ActionIcon title="Approve" tone="green" onClick={() => approveMut.mutate(log.id)}>
+                              <ActionIcon title="Approve All" tone="green" onClick={() => groupLogs.forEach((l: any) => approveMut.mutate(l.id))}>
                                 <Check size={13} />
                               </ActionIcon>
-                              <ActionIcon title="Reject" tone="red" onClick={() => rejectMut.mutate(log.id)}>
+                              <ActionIcon title="Reject All" tone="red" onClick={() => groupLogs.forEach((l: any) => rejectMut.mutate(l.id))}>
                                 <XCircle size={13} />
                               </ActionIcon>
                             </>
                           )}
-                          <ActionIcon title="Edit" tone="blue" onClick={() => {
+                          {canEdit('waste-logs') && <ActionIcon title="Edit" tone="blue" onClick={() => {
+                            setEditingIds(groupLogs.map((l: any) => l.id));
+                            // Parse depot from notes
+                            const rawNotes = first.notes || '';
+                            const depotMatch = rawNotes.match(/Depot:\s*([^|]+)/);
+                            const depotName = depotMatch ? depotMatch[1].trim() : '';
+                            const matchedDepot = depotName ? depots.find((d: any) => d.name === depotName) : null;
                             setForm({
-                              date: log.date ? new Date(log.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-                              siteId: log.siteId || '',
-                              depotId: '',
-                              collectorId: log.collectorId || '',
-                              notes: log.notes || '',
+                              date: first.date ? new Date(first.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+                              siteId: first.siteId || '',
+                              depotId: matchedDepot?.id || '',
+                              collectorId: first.collectorId || '',
+                              notes: (() => {
+                                const notesMatch = rawNotes.match(/Notes:\s*(.+?)(?:\s*\||$)/);
+                                return notesMatch ? notesMatch[1].trim() : '';
+                              })(),
                             });
+                            // Map waste inputs by wasteTypeId or by category name from notes
                             const wInputs: Record<string, number> = {};
-                            if (log.wasteTypeId) {
-                              wInputs[log.wasteTypeId] = Number(log.quantity) || 0;
-                            }
+                            groupLogs.forEach((l: any) => {
+                              if (l.wasteTypeId) {
+                                wInputs[l.wasteTypeId] = Number(l.quantity) || 0;
+                              } else {
+                                // Match by category name from notes to settings category
+                                const catMatch = l.notes?.match(/Category:\s*([^|]+)/);
+                                const catName = catMatch ? catMatch[1].trim() : '';
+                                if (catName) {
+                                  const matchedCat = wasteTypeList.find((c: any) => c.name === catName);
+                                  if (matchedCat) wInputs[matchedCat.id] = Number(l.quantity) || 0;
+                                }
+                              }
+                            });
                             setWasteInputs(wInputs);
                             setShowModal(true);
                           }}>
                             <Edit2 size={13} />
-                          </ActionIcon>
-                          <ActionIcon title="Delete" tone="red" onClick={() => handleDelete(log.id)}>
+                          </ActionIcon>}
+                          {canDelete('waste-logs') && <ActionIcon title="Delete" tone="red" onClick={() => {
+                            if (confirm(`Delete ${groupLogs.length} waste log${groupLogs.length > 1 ? ' entries' : ''} (${dnRef})?`)) {
+                              groupLogs.forEach((l: any) => deleteMut.mutate(l.id));
+                            }
+                          }}>
                             <Trash2 size={13} />
-                          </ActionIcon>
+                          </ActionIcon>}
                         </div>
                       </td>
                     </tr>
                   );
-                })
-              )}
+                });
+              })()}
             </tbody>
           </table>
         </div>
@@ -459,8 +555,8 @@ export default function WasteLogsPage() {
         <div className="modal-ov open">
           <div className="modal" style={{ width: 720 }}>
             <div className="mh">
-              <span className="mt">Record Waste Collection</span>
-              <button onClick={() => setShowModal(false)} className="mc"><X size={15} /></button>
+              <span className="mt">{editingIds.length > 0 ? 'Edit Waste Collection' : 'Record Waste Collection'}</span>
+              <button onClick={closeModal} className="mc"><X size={15} /></button>
             </div>
             <div className="mb">
               <div className="fgrid">
@@ -528,9 +624,9 @@ export default function WasteLogsPage() {
               </div>
             </div>
             <div className="mf">
-              <button onClick={() => setShowModal(false)} className="btn btn-ghost">Cancel</button>
+              <button onClick={closeModal} className="btn btn-ghost">Cancel</button>
               <button onClick={handleSave} disabled={isSubmitting || totalInputKg <= 0} className="btn btn-primary">
-                {isSubmitting ? 'Saving...' : 'Save Record'}
+                {isSubmitting ? 'Saving...' : (editingIds.length > 0 ? 'Update Record' : 'Save Record')}
               </button>
             </div>
           </div>

@@ -28,6 +28,9 @@ model User {
   violations        Violation[]         @relation("ViolationIssuedBy")
   approvedLogs      WasteLog[]          @relation("ApprovedByUser")
   wasteLogs         WasteLog[]          @relation("CreatedByUser")
+  eprReportsCreated  EprReport[]        @relation("EprCreatedBy")
+  eprReportsApproved EprReport[]        @relation("EprApprovedBy")
+  refreshTokens     RefreshToken[]
 
   @@map("users")
 }
@@ -48,7 +51,7 @@ model CustomRole {
 model Site {
   id             String      @id @default(uuid())
   name           String
-  type           SiteType    @default(COOPERATIVE)
+  type           SiteType    @default(IWMC)
   region         String      @default("")
   address        String      @default("")
   lat            Float?
@@ -77,13 +80,16 @@ model Site {
   supervisor     String      @default("")
   ward           String      @default("")
   depotId        String?
-  depot          Depot?      @relation(fields: [depotId], references: [id])
-  cooperatives   Cooperative[]
+  cooperativeId  String?
+  depot          Depot?       @relation(fields: [depotId], references: [id])
+  cooperative    Cooperative? @relation("CooperativeSites", fields: [cooperativeId], references: [id])
+  cooperatives   Cooperative[] @relation("SiteCooperatives")
   employees      Employee[]
   stockItems     StockItem[]
   users          User[]
   vehicles       Vehicle[]
   wasteLogs      WasteLog[]
+  eprReports     EprReport[]
 
   @@map("sites")
 }
@@ -134,6 +140,12 @@ model Employee {
   stipend               Float              @default(0)
   trainingComplete      Int                @default(0)
   uniformIssued         Boolean            @default(false)
+  // Vehicle Licence (SA)
+  licenceCode           String             @default("")
+  licenceNumber         String             @default("")
+  licenceExpiry         String?
+  hasPrDP               Boolean            @default(false)
+  prdpExpiry            String?
   attendances           Attendance[]
   trainings             EmployeeTraining[]
   site                  Site?              @relation(fields: [siteId], references: [id])
@@ -270,35 +282,54 @@ model Transaction {
 }
 
 model EprReport {
-  id           String       @id @default(uuid())
-  month        Int
-  year         Int
-  siteId       String?
-  totalTonnes  Float        @default(0)
-  totalRevenue Float        @default(0)
-  status       ReportStatus @default(DRAFT)
-  submittedAt  DateTime?
-  data         Json?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id                String       @id @default(uuid())
+  month             Int
+  year              Int
+  siteId            String?
+  totalTonnes       Float        @default(0)
+  totalRevenue      Float        @default(0)
+  status            ReportStatus @default(DRAFT)
+  submittedAt       DateTime?
+  data              Json?
+  dateFrom          DateTime?
+  dateTo            DateTime?
+  buyerConfirmation String       @default("")
+  traceabilityRef   String       @default("")
+  createdById       String?
+  approvedById      String?
+  approvedAt        DateTime?
+  rejectedReason    String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  createdByUser     User?        @relation("EprCreatedBy", fields: [createdById], references: [id])
+  approvedByUser    User?        @relation("EprApprovedBy", fields: [approvedById], references: [id])
+  site              Site?        @relation(fields: [siteId], references: [id])
 
   @@unique([month, year, siteId])
   @@map("epr_reports")
 }
 
 model StockItem {
-  id        String      @id @default(uuid())
-  code      String      @unique
-  item      String
-  category  String      @default("PPE")
-  uom       String      @default("each")
-  onHand    Float       @default(0)
-  reorderAt Float       @default(0)
-  status    StockStatus @default(OK)
-  siteId    String?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  site      Site?       @relation(fields: [siteId], references: [id])
+  id           String      @id @default(uuid())
+  code         String      @unique
+  item         String
+  category     String      @default("PPE")
+  uom          String      @default("each")
+  onHand       Float       @default(0)
+  reorderAt    Float       @default(0)
+  status       StockStatus @default(OK)
+  siteId       String?
+  unitCost     Float       @default(0)
+  size         String      @default("")
+  supplier     String      @default("")
+  notes        String      @default("")
+  serial       String      @default("")
+  condition    String      @default("Good")
+  assignedTo   String      @default("")
+  assignedSite String      @default("")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  site         Site?       @relation(fields: [siteId], references: [id])
 
   @@map("stock_items")
 }
@@ -338,7 +369,7 @@ model AuditLog {
 }
 
 model DeletionRequest {
-  id          String         @id
+  id          String         @id @default(uuid())
   reference   String         @unique
   requestedBy String
   reason      String         @default("")
@@ -347,7 +378,7 @@ model DeletionRequest {
   notes       String         @default("")
   processedAt DateTime?
   createdAt   DateTime       @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime       @updatedAt
   users       User           @relation(fields: [requestedBy], references: [id])
 
   @@index([requestedBy])
@@ -356,7 +387,7 @@ model DeletionRequest {
 }
 
 model Notification {
-  id        String           @id
+  id        String           @id @default(uuid())
   userId    String
   type      NotificationType @default(INFO)
   icon      String           @default("📌")
@@ -373,18 +404,15 @@ model Notification {
 }
 
 enum SiteType {
-  COOPERATIVE
-  DEPOT
-  BUYBACK_CENTRE
   IWMC
   MRC
-  GARDEN_SITE
-  LANDFILL
+  BBC
 }
 
 enum SiteStatus {
   ACTIVE
   INACTIVE
+  PLANNED
 }
 
 enum EmployeeStatus {
@@ -472,25 +500,31 @@ enum NotificationType {
 model Depot {
   id                String   @id @default(uuid())
   name              String
-  regionCode        String   @default("A")
-  physicalAddress   String   @default("")
+  code              String   @default("")
+  type              String   @default("IWMC")
+  status            String   @default("Active")
+  address           String   @default("")
+  gps               String   @default("")
+  phone             String   @default("")
+  operatingHours    String   @default("")
+  capacity          Float    @default(0)
+  currentStock      Float    @default(0)
+  siteId            String?
   managerUserId     String?
-  totalFleetCount   Int      @default(0)
-  totalCompactorTrucks Int   @default(0)
-  totalSkipLoaderTrucks Int  @default(0)
-  operatingBudget   Float    @default(0)
-  operationalStatus String   @default("active")
+  notes             String   @default("")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   sites             Site[]
+  cooperatives      Cooperative[]
 
   @@map("depots")
 }
 
 model Cooperative {
   id                    String   @id @default(uuid())
-  siteId                String
+  siteId                String?
+  depotId               String?
   name                  String
   registrationNumber    String   @default("")
   contactPerson         String   @default("")
@@ -499,10 +533,43 @@ model Cooperative {
   hasBalingMachine      Boolean  @default(false)
   materialPayoutRates   Json?
   dailyTonsRecovered    Float    @default(0)
+  stage                 String   @default("Formation")
+  proPartner            String   @default("")
+  mentor                String   @default("")
+  focus                 String   @default("")
+  revenue               Float    @default(0)
+  notes                 String   @default("")
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
-  site                  Site     @relation(fields: [siteId], references: [id])
+  site                  Site?    @relation("SiteCooperatives", fields: [siteId], references: [id])
+  depot                 Depot?   @relation(fields: [depotId], references: [id])
+  sites                 Site[]   @relation("CooperativeSites")
 
   @@map("cooperatives")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  family    String   @default(uuid())  // rotation family — revoke all if reuse detected
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([family])
+  @@map("refresh_tokens")
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
 }
